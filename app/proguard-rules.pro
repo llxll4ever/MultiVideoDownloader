@@ -1,0 +1,2 @@
+-keep class com.yausername.** { *; }
+-dontwarn com.yausername.**

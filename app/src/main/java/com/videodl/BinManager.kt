@@ -40,7 +40,7 @@ object BinManager {
         
         // Leer versiones
         val ytDlpVer = getVersion(ytDlpBin, "--version")
-        val ffmpegVer = getVersion(ffmpegBin, "-version").takeIf { it.isNotBlank() }?.lines().first() ?: "unknown"
+        val ffmpegVer = getVersion(ffmpegBin, "-version").takeIf { it.isNotBlank() }?.lines()?.firstOrNull() ?: "unknown"
         
         // Guardar version actual
         versionFile.writeText("$ytDlpVer|$ffmpegVer")

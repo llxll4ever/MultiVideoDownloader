@@ -1,12 +1,6 @@
 package com.example.multivideodownloader
 
-import android.Manifest
-import android.content.ClipboardManager
-import android.content.ContentValues
-import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -26,11 +20,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -49,7 +47,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-
 fun rawBrutalistColorScheme(): ColorScheme {
     return darkColorScheme(
         primary = Color(0xFFFFFFFF),
@@ -66,12 +63,20 @@ fun rawBrutalistColorScheme(): ColorScheme {
         onError = Color(0xFFFFFFFF)
     )
 }
+
+enum class TabItem(val label: String, val icon: android.graphics.drawable.Icon, val unselectedIcon: android.graphics.drawable.Icon) {
+    DOWNLOADS("Descargas", Icons.Default.Download, Icons.Default.Download),
+    GALLERY("Galería", Icons.Default.VideoLibrary, Icons.Default.VideoLibrary),
+    PLAYER("Reproductor", Icons.Default.PlayCircle, Icons.Default.PlayCircle)
+}
+
 class MainActivity : ComponentActivity() {
 
     private var sharedUrlState = mutableStateOf("")
     private var engineReadyState = mutableStateOf(false)
     private var engineVersionState = mutableStateOf("cargando...")
     private var statusMessageState = mutableStateOf("Inicializando motor yt-dlp + FFmpeg...")
+    private var selectedTab = mutableStateOf(TabItem.DOWNLOADS)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -115,15 +120,53 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    DownloaderScreen(
-                        initialUrl = sharedUrlState.value,
-                        engineReady = engineReadyState.value,
-                        engineVersion = engineVersionState.value,
-                        initialStatus = statusMessageState.value,
-                        onVersionUpdated = { newVer ->
-                            engineVersionState.value = newVer
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Main Content
+                        when (selectedTab.value) {
+                            TabItem.DOWNLOADS -> DownloaderScreen(
+                                initialUrl = sharedUrlState.value,
+                                engineReady = engineReadyState.value,
+                                engineVersion = engineVersionState.value,
+                                initialStatus = statusMessageState.value,
+                                onVersionUpdated = { newVer ->
+                                    engineVersionState.value = newVer
+                                },
+                                onUrlShared = { url ->
+                                    sharedUrlState.value = url
+                                }
+                            )
+                            TabItem.GALLERY -> GaleriaScreen()
+                            TabItem.PLAYER -> PlayerLauncherScreen(
+                                onBack = { selectedTab.value = TabItem.DOWNLOADS }
+                            )
                         }
-                    )
+
+                        // Bottom Navigation Bar
+                        NavigationBar {
+                            TabItem.values().forEach { tab ->
+                                NavigationBarItem(
+                                    icon = {
+                                        Icon(
+                                            imageVector = if (selectedTab.value == tab) tab.icon else tab.unselectedIcon,
+                                            contentDescription = tab.label,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    },
+                                    label = { Text(tab.label, style = MaterialTheme.typography.labelSmall) },
+                                    selected = selectedTab.value == tab,
+                                    onClick = { selectedTab.value = tab },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIndicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                        selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -149,6 +192,8 @@ class MainActivity : ComponentActivity() {
             intent.getStringExtra(Intent.EXTRA_TEXT)?.let { rawText ->
                 val clean = cleanIncomingUrl(rawText)
                 sharedUrlState.value = clean
+                // Switch to downloads tab when receiving a shared URL
+                selectedTab.value = TabItem.DOWNLOADS
             }
         }
     }
@@ -156,22 +201,22 @@ class MainActivity : ComponentActivity() {
     private fun requestNeededPermissions() {
         val perms = mutableListOf<String>()
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
-                perms.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                perms.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO)
-                != PackageManager.PERMISSION_GRANTED
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_MEDIA_VIDEO)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
-                perms.add(Manifest.permission.READ_MEDIA_VIDEO)
+                perms.add(android.Manifest.permission.READ_MEDIA_VIDEO)
             }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
-                perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                perms.add(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
         if (perms.isNotEmpty()) {
@@ -180,10 +225,39 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Composable
+fun PlayerLauncherScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Reproductor Externo",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Los videos se abren con el reproductor nativo del sistema.\nSelecciona un archivo en la Galería para reproducirlo.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier.width(200.dp)
+        ) {
+            Text("Volver a Descargas")
+        }
+    }
+}
+
 fun cleanIncomingUrl(raw: String): String {
-    val regex = "(https?://[^\\s]+)".toRegex()
+    val regex = "(https?://[^\\\\s]+)".toRegex()
     val match = regex.find(raw)?.value ?: raw.trim()
-    // Normalizar enlaces comunes y limpiar tracking parameters redundantes si es seguro
     return match.trimEnd('/', ' ', '\n', '\r')
 }
 
@@ -199,7 +273,8 @@ fun DownloaderScreen(
     engineReady: Boolean,
     engineVersion: String,
     initialStatus: String,
-    onVersionUpdated: (String) -> Unit
+    onVersionUpdated: (String) -> Unit,
+    onUrlShared: (String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -292,7 +367,7 @@ fun DownloaderScreen(
         ) {
             OutlinedButton(
                 onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     val pasted = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
                     if (!pasted.isNullOrBlank()) {
                         urlInput = cleanIncomingUrl(pasted)
@@ -314,7 +389,7 @@ fun DownloaderScreen(
             }
         }
 
-        // Selector de Calidad (Segmented-like)
+        // Selector de Calidad
         Text(
             text = "Calidad de descarga",
             style = MaterialTheme.typography.titleSmall,
@@ -397,7 +472,6 @@ fun DownloaderScreen(
 
                 scope.launch(Dispatchers.IO) {
                     try {
-                        // Directorio de staging privado para evitar errores de permisos Scoped Storage
                         val stagingDir = File(
                             context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.cacheDir,
                             "staging"
@@ -406,7 +480,6 @@ fun DownloaderScreen(
                             stagingDir.mkdirs()
                         }
 
-                        // Limpiar archivos temporales previos
                         stagingDir.listFiles()?.forEach { it.delete() }
 
                         val isAudioOnly = selectedQuality == QualityMode.AUDIO
@@ -422,7 +495,6 @@ fun DownloaderScreen(
 
                             when (selectedQuality) {
                                 QualityMode.BEST -> {
-                                    // Formato resiliente: combina video y audio si existen, o toma el mejor combinado
                                     addOption("-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b")
                                     addOption("--merge-output-format", "mp4")
                                 }
@@ -437,7 +509,6 @@ fun DownloaderScreen(
                                 }
                             }
 
-                            // Nombre seguro acotado
                             addOption("-o", "${stagingDir.absolutePath}/%(title).90s_%(id)s.%(ext)s")
                         }
 
@@ -462,7 +533,6 @@ fun DownloaderScreen(
                             }
                         }
 
-                        // Localizar archivo resultante en staging
                         val downloadedFiles = stagingDir.listFiles { file ->
                             file.isFile && file.length() > 0 && !file.name.endsWith(".part") && !file.name.endsWith(".ytdl")
                         }
@@ -471,7 +541,6 @@ fun DownloaderScreen(
                             val savedFile = downloadedFiles.first()
                             val cleanTitle = savedFile.nameWithoutExtension
 
-                            // Guardar en MediaStore (Galería / Álbum de fotos)
                             val publicUri = if (isAudioOnly) {
                                 saveAudioToMediaStore(context, savedFile, cleanTitle)
                             } else {
@@ -606,7 +675,6 @@ fun DownloaderScreen(
                             context,
                             YoutubeDL.UpdateChannel.STABLE
                         )
-                        // Consultar nueva versión
                         val verReq = YoutubeDLRequest("--version")
                         val verResp = YoutubeDL.getInstance().execute(verReq)
                         val newVer = verResp.out.trim()
@@ -640,13 +708,12 @@ fun DownloaderScreen(
 
 /**
  * Guarda el video en la Galería pública (Movies/MultiDownloader) mediante MediaStore.
- * Funciona de forma segura en Android 10, 11, 12, 13, 14 y 15 sin errores de Scoped Storage.
  */
-fun saveVideoToMediaStore(context: Context, sourceFile: File, title: String): Uri? {
+fun saveVideoToMediaStore(context: android.content.Context, sourceFile: File, title: String): Uri? {
     val resolver = context.contentResolver
     val cleanName = "${title.replace(Regex("[^a-zA-Z0-9_.-]"), "_")}.mp4"
 
-    val values = ContentValues().apply {
+    val values = android.content.ContentValues().apply {
         put(MediaStore.Video.Media.DISPLAY_NAME, cleanName)
         put(MediaStore.Video.Media.TITLE, title)
         put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
@@ -670,7 +737,7 @@ fun saveVideoToMediaStore(context: Context, sourceFile: File, title: String): Ur
             values.put(MediaStore.Video.Media.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
         }
-        MediaScannerConnection.scanFile(context, arrayOf(sourceFile.absolutePath), arrayOf("video/mp4"), null)
+        android.media.MediaScannerConnection.scanFile(context, arrayOf(sourceFile.absolutePath), arrayOf("video/mp4"), null)
         uri
     } catch (e: Exception) {
         Log.e("MediaStore", "Error copiando a MediaStore", e)
@@ -681,11 +748,11 @@ fun saveVideoToMediaStore(context: Context, sourceFile: File, title: String): Ur
 /**
  * Guarda audio MP3 en la colección pública (Music/MultiDownloader) mediante MediaStore.
  */
-fun saveAudioToMediaStore(context: Context, sourceFile: File, title: String): Uri? {
+fun saveAudioToMediaStore(context: android.content.Context, sourceFile: File, title: String): Uri? {
     val resolver = context.contentResolver
     val cleanName = "${title.replace(Regex("[^a-zA-Z0-9_.-]"), "_")}.mp3"
 
-    val values = ContentValues().apply {
+    val values = android.content.ContentValues().apply {
         put(MediaStore.Audio.Media.DISPLAY_NAME, cleanName)
         put(MediaStore.Audio.Media.TITLE, title)
         put(MediaStore.Audio.Media.MIME_TYPE, "audio/mpeg")
@@ -709,7 +776,7 @@ fun saveAudioToMediaStore(context: Context, sourceFile: File, title: String): Ur
             values.put(MediaStore.Audio.Media.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
         }
-        MediaScannerConnection.scanFile(context, arrayOf(sourceFile.absolutePath), arrayOf("audio/mpeg"), null)
+        android.media.MediaScannerConnection.scanFile(context, arrayOf(sourceFile.absolutePath), arrayOf("audio/mpeg"), null)
         uri
     } catch (e: Exception) {
         Log.e("MediaStore", "Error copiando audio a MediaStore", e)

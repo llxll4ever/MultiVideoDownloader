@@ -38,6 +38,11 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".PlayerScreen"
+            android:exported="false"
+            android:label="Reproductor"
+            android:screenOrientation="sensorLandscape" />
     </application>
 
 </manifest>

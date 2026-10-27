@@ -49,6 +49,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+
+fun rawBrutalistColorScheme(): ColorScheme {
+    return darkColorScheme(
+        primary = Color(0xFFFFFFFF),
+        secondary = Color(0xFFFFFFFF),
+        tertiary = Color(0xFF333333),
+        background = Color(0xFF000000),
+        surface = Color(0xFF111111),
+        onPrimary = Color(0xFF000000),
+        onSecondary = Color(0xFF000000),
+        onTertiary = Color(0xFFFFFFFF),
+        onBackground = Color(0xFFFFFFFF),
+        onSurface = Color(0xFFFFFFFF),
+        error = Color(0xFFFF3333),
+        onError = Color(0xFFFFFFFF)
+    )
+}
 class MainActivity : ComponentActivity() {
 
     private var sharedUrlState = mutableStateOf("")
@@ -93,7 +110,7 @@ class MainActivity : ComponentActivity() {
         }.start()
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            MaterialTheme(colorScheme = rawBrutalistColorScheme()) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -226,8 +243,8 @@ fun DownloaderScreen(
 
             // Badge del estado de yt-dlp
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (engineReady) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(0.dp),
+                color = if (engineReady) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.errorContainer,
                 modifier = Modifier.padding(top = 4.dp)
             ) {
                 Row(
@@ -311,8 +328,8 @@ fun DownloaderScreen(
             QualityMode.values().forEach { mode ->
                 val isSelected = selectedQuality == mode
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(0.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                     border = if (isSelected) ButtonDefaults.outlinedButtonBorder else null,
                     modifier = Modifier
                         .weight(1f)
@@ -342,8 +359,8 @@ fun DownloaderScreen(
 
         // Información de destino
         Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            shape = RoundedCornerShape(0.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -514,7 +531,7 @@ fun DownloaderScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
+                    .clip(RoundedCornerShape(0.dp))
             )
             OutlinedButton(
                 onClick = {
@@ -532,7 +549,7 @@ fun DownloaderScreen(
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                containerColor = MaterialTheme.colorScheme.surface
             )
         ) {
             Column(
@@ -560,7 +577,7 @@ fun DownloaderScreen(
                     )
                     if (showLogs) {
                         Surface(
-                            shape = RoundedCornerShape(4.dp),
+                            shape = RoundedCornerShape(0.dp),
                             color = MaterialTheme.colorScheme.surface,
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                         ) {

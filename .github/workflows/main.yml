@@ -24,7 +24,6 @@ jobs:
         with:
           api-level: 34
           ndk-version: r27c
-          cmdline-tools-version: latest
 
       - name: Aceptar licencias del SDK
         run: yes | sdkmanager --licenses

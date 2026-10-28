@@ -9,7 +9,7 @@ android {
 
  defaultConfig {
  applicationId = "com.example.multivideodownloader"
- minSdk = 24
+ minSdk = 26
  targetSdk = 34
  versionCode = 2
  versionName = "1.1.0"

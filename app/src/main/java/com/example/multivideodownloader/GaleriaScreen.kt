@@ -88,7 +88,15 @@ fun GaleriaScreen() {
 @Composable
 fun MediaCard(context: Context, item: MediaItem, onDelete: (MediaItem) -> Unit) {
     Card(
-        modifier = Modifier.height(200.dp),
+        modifier = Modifier
+            .height(200.dp)
+            .clickable {
+                // Open with default video player
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, item.uri).apply {
+                    setDataAndType(item.uri, "video/*")
+                }
+                context.startActivity(intent)
+            },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -111,7 +119,7 @@ fun MediaCard(context: Context, item: MediaItem, onDelete: (MediaItem) -> Unit) 
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.CenterHorizontally
+                        horizontalArrangement = Arrangement.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
@@ -156,12 +164,6 @@ fun MediaCard(context: Context, item: MediaItem, onDelete: (MediaItem) -> Unit) 
                 }
             }
         }
-    }.clickable {
-        // Open with default video player
-        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, item.uri).apply {
-            setDataAndType(item.uri, "video/*")
-        }
-        context.startActivity(intent)
     }
 }
 

@@ -30,6 +30,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -64,7 +66,7 @@ fun rawBrutalistColorScheme(): ColorScheme {
     )
 }
 
-enum class TabItem(val label: String, val icon: android.graphics.drawable.Icon, val unselectedIcon: android.graphics.drawable.Icon) {
+enum class TabItem(val label: String, val icon: ImageVector, val unselectedIcon: ImageVector) {
     DOWNLOADS("Descargas", Icons.Default.Download, Icons.Default.Download),
     GALLERY("Galería", Icons.Default.VideoLibrary, Icons.Default.VideoLibrary),
     PLAYER("Reproductor", Icons.Default.PlayCircle, Icons.Default.PlayCircle)
@@ -156,7 +158,7 @@ class MainActivity : ComponentActivity() {
                                     selected = selectedTab.value == tab,
                                     onClick = { selectedTab.value = tab },
                                     colors = NavigationBarItemDefaults.colors(
-                                        selectedIndicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                                         selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                         selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                         unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,

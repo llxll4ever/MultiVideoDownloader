@@ -5,9 +5,8 @@ import android.os.Bundle
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.activity.ComponentActivity
-import androidx.appcompat.app.AppCompatActivity
 
-class PlayerScreen : AppCompatActivity() {
+class PlayerScreen : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val videoUriString = intent?.dataString ?: return finish()

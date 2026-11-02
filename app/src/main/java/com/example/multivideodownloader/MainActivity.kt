@@ -134,7 +134,7 @@ class MainActivity : ComponentActivity() {
                                     engineVersionState.value = newVer
                                 },
                                 onUrlShared = { url ->
-                                    sharedUrlState.value = url
+                                    sharedUrlState.value = cleanIncomingUrl(url)
                                 }
                             )
                             TabItem.GALLERY -> GaleriaScreen()

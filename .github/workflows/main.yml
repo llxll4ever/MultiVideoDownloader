@@ -22,9 +22,7 @@ jobs:
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # 'tools' ya no existe en los repos del SDK moderno y rompe el action con exit 1.
-          packages: 'platform-tools'
-          api-level: 34
+          packages: 'platform-tools;platforms;android-34'
 
       - name: Aceptar licencias del SDK
         run: yes | sdkmanager --licenses || true

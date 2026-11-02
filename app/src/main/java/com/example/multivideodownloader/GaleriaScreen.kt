@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -59,17 +58,16 @@ fun GaleriaScreen() {
             text = "Galería de Descargas",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.padding(bottom = 12.dp)
         )
         Text(
             text = message,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.outline,
             modifier = Modifier.padding(bottom = 12.dp)
         )
         if (isLoading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally), color = MaterialTheme.colorScheme.primary)
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
@@ -93,48 +91,26 @@ fun MediaCard(context: Context, item: MediaItem, onDelete: (MediaItem) -> Unit) 
         modifier = Modifier
             .height(200.dp)
             .clickable {
-                // Open with internal PlayerScreen
-                val intent = android.content.Intent(context, PlayerScreen::class.java).apply {
-                    data = item.uri
-                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                // Open with default video player
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, item.uri).apply {
+                    setDataAndType(item.uri, "video/*")
                 }
                 context.startActivity(intent)
             },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Thumbnail via ContentResolver thumbnail API (API 29+ available, graceful fallback)
             Box(modifier = Modifier.weight(1f)) {
-                if (item.isVideo) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(item.uri)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = item.name,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    // Show a generic music icon for audio files
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.MusicNote,
-                                contentDescription = "Audio",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(48.dp)
-                            )
-                        }
-                    }
-                }
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(item.uri)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = item.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
                 // Play icon overlay
                 Surface(
                     color = Color.Black.copy(alpha = 0.3f),
@@ -166,31 +142,16 @@ fun MediaCard(context: Context, item: MediaItem, onDelete: (MediaItem) -> Unit) 
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
+                        fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = "${item.sizeMb.toInt()} MB · ${SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(item.dateAddedMs))}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.outline,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                    type = if (item.isVideo) "video/*" else "audio/*"
-                    putExtra(android.content.Intent.EXTRA_STREAM, item.uri)
-                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(android.content.Intent.createChooser(shareIntent, "Compartir con..."))
-            }) {
-                Icon(
-                    imageVector = Icons.Default.Share,
-                    contentDescription = "Compartir",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-
                 IconButton(onClick = {
                     val deleted = context.contentResolver.delete(item.uri, null, null)
                     if (deleted > 0) onDelete(item)

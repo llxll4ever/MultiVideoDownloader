@@ -39,9 +39,34 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.example.multivideodownloader.ui.theme.MultiVideoDownloaderTheme
-import com.example.multivideodownloader.ui.theme.brutaloaderColorScheme
-import com.example.multivideodownloader.ui.theme.LightColorScheme
+import com.yausername.aria2c.Aria2c
+import com.yausername.ffmpeg.FFmpeg
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLException
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+fun rawBrutalistColorScheme(): ColorScheme {
+    return darkColorScheme(
+        primary = Color(0xFFFFFFFF),
+        secondary = Color(0xFFFFFFFF),
+        tertiary = Color(0xFF333333),
+        background = Color(0xFF000000),
+        surface = Color(0xFF111111),
+        onPrimary = Color(0xFF000000),
+        onSecondary = Color(0xFF000000),
+        onTertiary = Color(0xFFFFFFFF),
+        onBackground = Color(0xFFFFFFFF),
+        onSurface = Color(0xFFFFFFFF),
+        error = Color(0xFFFF3333),
+        onError = Color(0xFFFFFFFF)
+    )
+}
+
+enum class TabItem(val label: String, val icon: ImageVector, val unselectedIcon: ImageVector) {
     DOWNLOADS("Descargas", Icons.Default.Download, Icons.Default.Download),
     GALLERY("Galería", Icons.Default.VideoLibrary, Icons.Default.VideoLibrary),
     PLAYER("Reproductor", Icons.Default.PlayCircle, Icons.Default.PlayCircle)
@@ -92,7 +117,7 @@ class MainActivity : ComponentActivity() {
         }.start()
 
         setContent {
-            MultiVideoDownloaderTheme {
+            MaterialTheme(colorScheme = rawBrutalistColorScheme()) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

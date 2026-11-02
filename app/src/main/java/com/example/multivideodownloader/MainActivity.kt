@@ -39,34 +39,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.yausername.aria2c.Aria2c
-import com.yausername.ffmpeg.FFmpeg
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLException
-import com.yausername.youtubedl_android.YoutubeDLRequest
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
-
-fun rawBrutalistColorScheme(): ColorScheme {
-    return darkColorScheme(
-        primary = Color(0xFFFFFFFF),
-        secondary = Color(0xFFFFFFFF),
-        tertiary = Color(0xFF333333),
-        background = Color(0xFF000000),
-        surface = Color(0xFF111111),
-        onPrimary = Color(0xFF000000),
-        onSecondary = Color(0xFF000000),
-        onTertiary = Color(0xFFFFFFFF),
-        onBackground = Color(0xFFFFFFFF),
-        onSurface = Color(0xFFFFFFFF),
-        error = Color(0xFFFF3333),
-        onError = Color(0xFFFFFFFF)
-    )
-}
-
-enum class TabItem(val label: String, val icon: ImageVector, val unselectedIcon: ImageVector) {
+import com.example.multivideodownloader.ui.theme.MultiVideoDownloaderTheme
+import com.example.multivideodownloader.ui.theme.brutaloaderColorScheme
+import com.example.multivideodownloader.ui.theme.LightColorScheme
     DOWNLOADS("Descargas", Icons.Default.Download, Icons.Default.Download),
     GALLERY("Galería", Icons.Default.VideoLibrary, Icons.Default.VideoLibrary),
     PLAYER("Reproductor", Icons.Default.PlayCircle, Icons.Default.PlayCircle)
@@ -117,7 +92,7 @@ class MainActivity : ComponentActivity() {
         }.start()
 
         setContent {
-            MaterialTheme(colorScheme = rawBrutalistColorScheme()) {
+            MultiVideoDownloaderTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -673,9 +648,13 @@ fun DownloaderScreen(
                 statusText = "Buscando y descargando última versión de yt-dlp desde GitHub..."
                 scope.launch(Dispatchers.IO) {
                     try {
+                        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+                        val customChannel = YoutubeDL.UpdateChannel(
+                            "https://ytdlp-updater.rodriguezrodriguez.art/latest?abi=$abi"
+                        )
                         val status = YoutubeDL.getInstance().updateYoutubeDL(
                             context,
-                            YoutubeDL.UpdateChannel.STABLE
+                            customChannel
                         )
                         val verReq = YoutubeDLRequest("--version")
                         val verResp = YoutubeDL.getInstance().execute(verReq)
@@ -687,10 +666,27 @@ fun DownloaderScreen(
                             statusText = "¡Motor actualizado a versión $newVer! Resultado: $status"
                         }
                     } catch (e: Exception) {
-                        Log.e("MultiDownloader", "Error actualizando yt-dlp", e)
-                        withContext(Dispatchers.Main) {
-                            isUpdating = false
-                            statusText = "No se pudo actualizar: ${e.localizedMessage}"
+                        Log.e("MultiDownloader", "Error con endpoint custom, intentando STABLE...", e)
+                        try {
+                            val status = YoutubeDL.getInstance().updateYoutubeDL(
+                                context,
+                                YoutubeDL.UpdateChannel.STABLE
+                            )
+                            val verReq = YoutubeDLRequest("--version")
+                            val verResp = YoutubeDL.getInstance().execute(verReq)
+                            val newVer = verResp.out.trim()
+
+                            withContext(Dispatchers.Main) {
+                                isUpdating = false
+                                onVersionUpdated(newVer)
+                                statusText = "¡Motor actualizado (STABLE) a versión $newVer!"
+                            }
+                        } catch (e2: Exception) {
+                            Log.e("MultiDownloader", "Error actualizando yt-dlp", e2)
+                            withContext(Dispatchers.Main) {
+                                isUpdating = false
+                                statusText = "No se pudo actualizar: ${e2.localizedMessage}"
+                            }
                         }
                     }
                 }

@@ -22,7 +22,7 @@ jobs:
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'platform-tools;platforms;android-34'
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Aceptar licencias del SDK
         run: yes | sdkmanager --licenses || true
@@ -31,7 +31,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.7'
-          arguments: assembleDebug
+          arguments: assembleDebug --stacktrace
 
       - name: Subir APK compilado
         uses: actions/upload-artifact@v4

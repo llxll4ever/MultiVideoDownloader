@@ -16,15 +16,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,19 +59,18 @@ fun GaleriaScreen() {
             .background(EditorialPalette.Paper)
             .padding(horizontal = 20.dp, vertical = 18.dp)
     ) {
-        // Eyebrow
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "ARCHIVO LOCAL",
+                text = "BÓVEDA LOCAL // EXPEDIENTES",
                 color = EditorialPalette.Brick,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
+                fontFamily = EditorialType.MonoTypewriter,
+                fontWeight = FontWeight.Bold,
                 fontSize = 10.sp,
-                letterSpacing = 1.6.sp
+                letterSpacing = 1.5.sp
             )
             HorizontalDivider(
                 modifier = Modifier.weight(1f),
@@ -81,32 +79,42 @@ fun GaleriaScreen() {
             )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Bottom
         ) {
-            Text(
-                text = "Galería.",
-                color = EditorialPalette.Ink,
-                fontSize = 30.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-1).sp
-            )
-            Text(
-                text = "${mediaList.size} ARCHIVOS",
-                color = EditorialPalette.Muted,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 10.sp,
-                letterSpacing = 1.sp,
-                modifier = Modifier.padding(bottom = 4.dp)
+            Column {
+                Text(
+                    text = "Archivo.",
+                    color = EditorialPalette.Ink,
+                    fontFamily = EditorialType.DisplayTypewriter,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Descargas verificadas en dispositivo",
+                    color = EditorialPalette.Muted,
+                    fontFamily = EditorialType.MonoTypewriter,
+                    fontSize = 10.5.sp
+                )
+            }
+
+            TopSecretStamp(
+                spec = StampSpec(
+                    topSerial = "REGISTRO // LOCAL",
+                    mainStamp = "★ ${mediaList.size} ITEMS ★",
+                    bottomCode = "ACCESO AUTORIZADO",
+                    inkColor = EditorialPalette.Ink,
+                    tiltDegrees = -3.2f
+                ),
+                compact = true
             )
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         if (isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -123,16 +131,18 @@ fun GaleriaScreen() {
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "Sin archivos guardados",
+                        text = "Sin expedientes guardados",
                         color = EditorialPalette.Ink,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
+                        fontFamily = EditorialType.DisplayTypewriter,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "Tus videos y audios descargados aparecerán aquí.",
                         color = EditorialPalette.Muted,
-                        fontSize = 12.sp
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontSize = 11.5.sp
                     )
                 }
             }
@@ -157,7 +167,7 @@ fun GaleriaScreen() {
 fun MediaCard(context: Context, item: MediaItem, onDelete: (MediaItem) -> Unit) {
     Column(
         modifier = Modifier
-            .height(206.dp)
+            .height(212.dp)
             .clip(RoundedCornerShape(2.dp))
             .background(EditorialPalette.Raised)
             .border(1.dp, EditorialPalette.LineStrong, RoundedCornerShape(2.dp))
@@ -183,7 +193,6 @@ fun MediaCard(context: Context, item: MediaItem, onDelete: (MediaItem) -> Unit) 
                 )
             }
 
-            // Sello MP4 / MP3 en esquina superior izquierda
             Box(
                 modifier = Modifier
                     .padding(8.dp)
@@ -197,14 +206,13 @@ fun MediaCard(context: Context, item: MediaItem, onDelete: (MediaItem) -> Unit) 
                 Text(
                     text = if (item.isVideo) "MP4" else "MP3",
                     color = EditorialPalette.PaperInk,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = EditorialType.DisplayTypewriter,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp,
+                    fontSize = 9.sp,
                     letterSpacing = 0.8.sp
                 )
             }
 
-            // Botón central Play
             Box(
                 modifier = Modifier
                     .size(38.dp)
@@ -223,48 +231,65 @@ fun MediaCard(context: Context, item: MediaItem, onDelete: (MediaItem) -> Unit) 
 
         HorizontalDivider(thickness = 1.dp, color = EditorialPalette.Line)
 
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 9.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.name,
-                    color = EditorialPalette.Ink,
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "${String.format(Locale.US, "%.1f MB", item.sizeMb)} · ${SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(item.dateAddedMs))}",
-                    color = EditorialPalette.Muted,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 9.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            IconButton(
-                onClick = {
-                    try {
-                        val deleted = context.contentResolver.delete(item.uri, null, null)
-                        if (deleted > 0) onDelete(item)
-                    } catch (_: Exception) {
-                    }
-                },
-                modifier = Modifier.size(30.dp)
+            Text(
+                text = item.name,
+                color = EditorialPalette.Ink,
+                fontFamily = EditorialType.MonoTypewriter,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = Icons.Default.DeleteOutline,
-                    contentDescription = "Eliminar",
-                    tint = EditorialPalette.Danger,
-                    modifier = Modifier.size(17.dp)
+                Text(
+                    text = "${String.format(Locale.US, "%.1fMB", item.sizeMb)} · ${SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(item.dateAddedMs))}",
+                    color = EditorialPalette.Muted,
+                    fontFamily = EditorialType.MonoTypewriter,
+                    fontSize = 8.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+                Row {
+                    IconButton(
+                        onClick = { shareMediaUri(context, item.uri, !item.isVideo) },
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Compartir",
+                            tint = EditorialPalette.Brick,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            try {
+                                val deleted = context.contentResolver.delete(item.uri, null, null)
+                                if (deleted > 0) onDelete(item)
+                            } catch (_: Exception) {
+                            }
+                        },
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Eliminar",
+                            tint = EditorialPalette.Danger,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
             }
         }
     }

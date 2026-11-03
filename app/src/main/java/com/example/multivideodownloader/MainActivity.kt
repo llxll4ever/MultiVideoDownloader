@@ -12,6 +12,9 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,14 +27,13 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -40,16 +42,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -72,7 +81,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Paleta Editorial Industrial (multivideo-prototipo.html)
+// Paleta Editorial Industrial / Expediente Clasificado
 object EditorialPalette {
     val Paper = Color(0xFFE9EBE1)
     val Raised = Color(0xFFF4F5EC)
@@ -91,6 +100,20 @@ object EditorialPalette {
     val DangerSurface = Color(0xFFFBEAE6)
     val DisabledBg = Color(0xFFC9CCC0)
     val DisabledFg = Color(0xFF6E7366)
+}
+
+// Tipografía de Máquina de Escribir (Special Elite + Courier Prime)
+object EditorialType {
+    val DisplayTypewriter = FontFamily(
+        Font(R.font.special_elite, FontWeight.Normal),
+        Font(R.font.special_elite, FontWeight.Bold)
+    )
+    val MonoTypewriter = FontFamily(
+        Font(R.font.courier_prime_regular, FontWeight.Normal),
+        Font(R.font.courier_prime_regular, FontWeight.Medium),
+        Font(R.font.courier_prime_bold, FontWeight.SemiBold),
+        Font(R.font.courier_prime_bold, FontWeight.Bold)
+    )
 }
 
 fun editorialColorScheme(): ColorScheme {
@@ -114,10 +137,27 @@ fun editorialColorScheme(): ColorScheme {
     )
 }
 
+fun editorialTypography(): Typography {
+    val base = Typography()
+    return base.copy(
+        headlineLarge = base.headlineLarge.copy(fontFamily = EditorialType.DisplayTypewriter),
+        headlineMedium = base.headlineMedium.copy(fontFamily = EditorialType.DisplayTypewriter),
+        headlineSmall = base.headlineSmall.copy(fontFamily = EditorialType.DisplayTypewriter),
+        titleLarge = base.titleLarge.copy(fontFamily = EditorialType.DisplayTypewriter),
+        titleMedium = base.titleMedium.copy(fontFamily = EditorialType.MonoTypewriter),
+        titleSmall = base.titleSmall.copy(fontFamily = EditorialType.MonoTypewriter),
+        bodyLarge = base.bodyLarge.copy(fontFamily = EditorialType.MonoTypewriter),
+        bodyMedium = base.bodyMedium.copy(fontFamily = EditorialType.MonoTypewriter),
+        bodySmall = base.bodySmall.copy(fontFamily = EditorialType.MonoTypewriter),
+        labelLarge = base.labelLarge.copy(fontFamily = EditorialType.MonoTypewriter),
+        labelMedium = base.labelMedium.copy(fontFamily = EditorialType.MonoTypewriter),
+        labelSmall = base.labelSmall.copy(fontFamily = EditorialType.MonoTypewriter)
+    )
+}
+
 enum class TabItem(val label: String, val icon: ImageVector) {
-    DOWNLOADS("MESA", Icons.Default.Download),
-    GALLERY("GALERÍA", Icons.Default.VideoLibrary),
-    PLAYER("REPRODUCTOR", Icons.Default.PlayCircle)
+    DOWNLOADS("MESA // EXPEDIENTE", Icons.Default.Download),
+    GALLERY("ARCHIVO // GALERÍA", Icons.Default.VideoLibrary)
 }
 
 data class CompletedDownload(
@@ -127,9 +167,232 @@ data class CompletedDownload(
     val isAudio: Boolean
 )
 
+data class QueuedItem(
+    val id: Long,
+    val url: String,
+    val quality: QualityMode,
+    val stamp: StampSpec
+)
+
+data class StampSpec(
+    val topSerial: String,
+    val mainStamp: String,
+    val bottomCode: String,
+    val inkColor: Color,
+    val tiltDegrees: Float = -3.6f
+)
+
+/**
+ * Detecta la plataforma del enlace y genera los metadatos del Sello "Top Secret".
+ */
+fun detectPlatformStamp(rawUrl: String): StampSpec? {
+    val url = rawUrl.trim()
+    if (url.isEmpty() || !url.startsWith("http", ignoreCase = true)) return null
+    val lower = url.lowercase(Locale.ROOT)
+
+    val xMatch = Regex("""(?:x\.com|twitter\.com|fxtwitter\.com|vxtwitter\.com)/(?:([^/]+)/)?status/(\d+)""", RegexOption.IGNORE_CASE).find(url)
+    if (xMatch != null || lower.contains("x.com/") || lower.contains("twitter.com/") || lower.contains("t.co/")) {
+        val user = xMatch?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { "@${it.uppercase(Locale.ROOT)}" } ?: "X-CORP"
+        val idTail = xMatch?.groupValues?.getOrNull(2)?.takeLast(6) ?: "DIRECT"
+        return StampSpec(
+            topSerial = "CLASIFICADO // $user",
+            mainStamp = "★ X · TWITTER ★",
+            bottomCode = "EXP-#$idTail // STREAM",
+            inkColor = EditorialPalette.Brick,
+            tiltDegrees = -3.8f
+        )
+    }
+
+    if (lower.contains("instagram.com") || lower.contains("instagr.am")) {
+        val isReel = lower.contains("/reel")
+        return StampSpec(
+            topSerial = "EXPEDIENTE // META-IG",
+            mainStamp = if (isReel) "★ IG · REEL ★" else "★ IG · MEDIA ★",
+            bottomCode = "ORIGEN VERIFICADO // MP4",
+            inkColor = EditorialPalette.Brick,
+            tiltDegrees = -3.2f
+        )
+    }
+
+    if (lower.contains("tiktok.com")) {
+        return StampSpec(
+            topSerial = "EXPEDIENTE // BYTEDANCE",
+            mainStamp = "★ TIKTOK · CLIP ★",
+            bottomCode = "SIN SELLO // STREAM HD",
+            inkColor = EditorialPalette.Ink,
+            tiltDegrees = -4.0f
+        )
+    }
+
+    if (lower.contains("redgifs.com")) {
+        return StampSpec(
+            topSerial = "TOP SECRET // +18 NSFW",
+            mainStamp = "★ REDGIFS · HD ★",
+            bottomCode = "NIVEL RESTRINGIDO // MP4",
+            inkColor = EditorialPalette.Danger,
+            tiltDegrees = -4.2f
+        )
+    }
+
+    if (lower.contains("facebook.com") || lower.contains("fb.watch") || lower.contains("fb.com")) {
+        return StampSpec(
+            topSerial = "EXPEDIENTE // META-FB",
+            mainStamp = "★ FB · VIDEO ★",
+            bottomCode = "ARCHIVO PÚBLICO // MP4",
+            inkColor = EditorialPalette.Ink,
+            tiltDegrees = -3.0f
+        )
+    }
+
+    if (lower.contains("youtube.com") || lower.contains("youtu.be")) {
+        val isShort = lower.contains("/shorts/")
+        return StampSpec(
+            topSerial = "EXPEDIENTE // GOOGLE-YT",
+            mainStamp = if (isShort) "★ YT · SHORT ★" else "★ YOUTUBE · HD ★",
+            bottomCode = "MUX AUDIO+VIDEO // MP4",
+            inkColor = EditorialPalette.Brick,
+            tiltDegrees = -3.5f
+        )
+    }
+
+    return StampSpec(
+        topSerial = "EXPEDIENTE // EXTERNO",
+        mainStamp = "★ WEB · STREAM ★",
+        bottomCode = "EXTRACTOR UNIVERSAL",
+        inkColor = EditorialPalette.InkSoft,
+        tiltDegrees = -2.8f
+    )
+}
+
+/**
+ * Sello estilo "TOP SECRET / DESCLASIFICADO" con doble marco, desgaste de tinta y golpe de resorte.
+ */
+@Composable
+fun TopSecretStamp(
+    spec: StampSpec,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
+) {
+    var stamped by remember(spec.mainStamp, spec.bottomCode) { mutableStateOf(false) }
+    LaunchedEffect(spec.mainStamp, spec.bottomCode) {
+        stamped = true
+    }
+
+    val scale by animateFloatAsState(
+        targetValue = if (stamped) 1f else 1.65f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "stampScale"
+    )
+
+    Box(
+        modifier = modifier
+            .scale(scale)
+            .rotate(spec.tiltDegrees)
+            .background(spec.inkColor.copy(alpha = 0.05f), RoundedCornerShape(2.dp))
+    ) {
+        // Marco doble de sello de goma + líneas de desgaste de tinta
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val outerStroke = 2.2.dp.toPx()
+            val innerStroke = 0.9.dp.toPx()
+            val inset = 3.6.dp.toPx()
+
+            // Marco exterior grueso
+            drawRoundRect(
+                color = spec.inkColor.copy(alpha = 0.90f),
+                topLeft = Offset(outerStroke / 2f, outerStroke / 2f),
+                size = Size(size.width - outerStroke, size.height - outerStroke),
+                cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+                style = Stroke(width = outerStroke)
+            )
+
+            // Marco interior fino tipo sello militar / archivo
+            drawRoundRect(
+                color = spec.inkColor.copy(alpha = 0.72f),
+                topLeft = Offset(inset, inset),
+                size = Size(size.width - inset * 2f, size.height - inset * 2f),
+                cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx()),
+                style = Stroke(
+                    width = innerStroke,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(28f, 3f, 14f, 2f), 0f)
+                )
+            )
+
+            // Pequeñas muescas de desgaste de tinta ("grunge") sobre el borde
+            val wearColor = EditorialPalette.Raised.copy(alpha = 0.65f)
+            drawLine(
+                color = wearColor,
+                start = Offset(size.width * 0.18f, 0f),
+                end = Offset(size.width * 0.22f, outerStroke * 2f),
+                strokeWidth = 1.6.dp.toPx()
+            )
+            drawLine(
+                color = wearColor,
+                start = Offset(size.width * 0.76f, size.height - outerStroke * 2f),
+                end = Offset(size.width * 0.81f, size.height),
+                strokeWidth = 1.8.dp.toPx()
+            )
+        }
+
+        Column(
+            modifier = Modifier.padding(
+                horizontal = if (compact) 10.dp else 13.dp,
+                vertical = if (compact) 5.dp else 7.dp
+            ),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = spec.topSerial,
+                color = spec.inkColor.copy(alpha = 0.88f),
+                fontFamily = EditorialType.MonoTypewriter,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (compact) 7.sp else 7.5.sp,
+                letterSpacing = 1.4.sp
+            )
+
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 2.dp)
+                    .widthIn(min = if (compact) 95.dp else 130.dp)
+                    .height(0.8.dp)
+                    .background(spec.inkColor.copy(alpha = 0.65f))
+            )
+
+            Text(
+                text = spec.mainStamp,
+                color = spec.inkColor,
+                fontFamily = EditorialType.DisplayTypewriter,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (compact) 12.sp else 14.5.sp,
+                letterSpacing = 1.8.sp
+            )
+
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 2.dp)
+                    .widthIn(min = if (compact) 95.dp else 130.dp)
+                    .height(0.8.dp)
+                    .background(spec.inkColor.copy(alpha = 0.65f))
+            )
+
+            Text(
+                text = spec.bottomCode,
+                color = spec.inkColor.copy(alpha = 0.85f),
+                fontFamily = EditorialType.MonoTypewriter,
+                fontWeight = FontWeight.Bold,
+                fontSize = if (compact) 6.8.sp else 7.5.sp,
+                letterSpacing = 1.2.sp
+            )
+        }
+    }
+}
+
 class MainActivity : ComponentActivity() {
 
     private var sharedUrlState = mutableStateOf("")
+    private var autoStartSignalState = mutableIntStateOf(0)
     private var engineReadyState = mutableStateOf(false)
     private var engineVersionState = mutableStateOf("cargando...")
     private var statusMessageState = mutableStateOf("Inicializando motor yt-dlp + FFmpeg...")
@@ -204,19 +467,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            MaterialTheme(colorScheme = editorialColorScheme()) {
+            MaterialTheme(
+                colorScheme = editorialColorScheme(),
+                typography = editorialTypography()
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = EditorialPalette.Paper
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
-                        // Topbar Editorial idéntica al prototipo
                         EditorialTopBar(
-                            engineReady = engineReadyState.value,
-                            engineVersion = engineVersionState.value
+                            engineReady = engineReadyState.value
                         )
 
-                        // Contenido principal con weight(1f) para no ocultar la barra inferior
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -225,6 +488,7 @@ class MainActivity : ComponentActivity() {
                             when (selectedTab.value) {
                                 TabItem.DOWNLOADS -> DownloaderScreen(
                                     initialUrl = sharedUrlState.value,
+                                    autoStartSignal = autoStartSignalState.intValue,
                                     engineReady = engineReadyState.value,
                                     engineVersion = engineVersionState.value,
                                     initialStatus = statusMessageState.value,
@@ -236,14 +500,9 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                                 TabItem.GALLERY -> GaleriaScreen()
-                                TabItem.PLAYER -> PlayerLauncherScreen(
-                                    onBack = { selectedTab.value = TabItem.DOWNLOADS },
-                                    onGoGallery = { selectedTab.value = TabItem.GALLERY }
-                                )
                             }
                         }
 
-                        // Barra de navegación inferior estilo Editorial
                         EditorialBottomBar(
                             selectedTab = selectedTab.value,
                             onSelectTab = { selectedTab.value = it }
@@ -273,8 +532,11 @@ class MainActivity : ComponentActivity() {
         if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
             intent.getStringExtra(Intent.EXTRA_TEXT)?.let { rawText ->
                 val clean = cleanIncomingUrl(rawText)
-                sharedUrlState.value = clean
-                selectedTab.value = TabItem.DOWNLOADS
+                if (clean.startsWith("http")) {
+                    sharedUrlState.value = clean
+                    selectedTab.value = TabItem.DOWNLOADS
+                    autoStartSignalState.intValue += 1
+                }
             }
         }
     }
@@ -308,8 +570,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun EditorialTopBar(
-    engineReady: Boolean,
-    engineVersion: String
+    engineReady: Boolean
 ) {
     Column(
         modifier = Modifier
@@ -322,53 +583,53 @@ fun EditorialTopBar(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Sello ladrillo "MV"
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(32.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(EditorialPalette.Brick),
+                    .background(EditorialPalette.Brick)
+                    .border(1.dp, EditorialPalette.Ink, RoundedCornerShape(2.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "MV",
                     color = EditorialPalette.PaperInk,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = EditorialType.DisplayTypewriter,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     letterSpacing = 0.5.sp
                 )
             }
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            // Wordmark MULTI / VIDEO DOWNLOADER
             Column {
                 Text(
                     text = "MULTI",
                     color = EditorialPalette.Ink,
+                    fontFamily = EditorialType.DisplayTypewriter,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    letterSpacing = (-0.2).sp
+                    fontSize = 14.sp,
+                    letterSpacing = 0.5.sp
                 )
                 Text(
                     text = "VIDEO DOWNLOADER",
                     color = EditorialPalette.Muted,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = EditorialType.MonoTypewriter,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 8.sp,
-                    letterSpacing = 1.sp
+                    letterSpacing = 1.1.sp
                 )
             }
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Engine Pill (LISTO / INICIANDO)
             Row(
                 modifier = Modifier
                     .height(30.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(EditorialPalette.Raised)
-                    .border(1.dp, EditorialPalette.Line, RoundedCornerShape(2.dp))
+                    .border(1.dp, EditorialPalette.LineStrong, RoundedCornerShape(2.dp))
                     .padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -382,10 +643,10 @@ fun EditorialTopBar(
                 Text(
                     text = if (engineReady) "LISTO" else "CARGANDO",
                     color = EditorialPalette.InkSoft,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = EditorialType.MonoTypewriter,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 9.sp,
-                    letterSpacing = 0.8.sp
+                    letterSpacing = 1.sp
                 )
             }
         }
@@ -407,8 +668,8 @@ fun EditorialBottomBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(60.dp)
-                .padding(horizontal = 12.dp),
+                .height(58.dp)
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             TabItem.values().forEach { tab ->
@@ -423,117 +684,28 @@ fun EditorialBottomBar(
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(28.dp)
+                            .width(42.dp)
                             .height(2.dp)
                             .background(if (selected) EditorialPalette.Brick else Color.Transparent)
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Icon(
-                        imageVector = tab.icon,
-                        contentDescription = tab.label,
-                        tint = if (selected) EditorialPalette.Ink else EditorialPalette.Muted,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = tab.label,
-                        color = if (selected) EditorialPalette.Ink else EditorialPalette.Muted,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 9.sp,
-                        letterSpacing = 0.9.sp
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun PlayerLauncherScreen(
-    onBack: () -> Unit,
-    onGoGallery: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(EditorialPalette.Paper)
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, EditorialPalette.LineStrong, RoundedCornerShape(2.dp))
-                .background(EditorialPalette.Raised, RoundedCornerShape(2.dp))
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    imageVector = Icons.Default.PlayCircle,
-                    contentDescription = null,
-                    tint = EditorialPalette.Brick,
-                    modifier = Modifier.size(40.dp)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "REPRODUCTOR DE MEDIOS",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.4.sp,
-                    color = EditorialPalette.Brick
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Reproduce tus descargas sin salir",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EditorialPalette.Ink
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Toca cualquier video o audio en la lista de Recientes o en la Galería para abrirlo con el reproductor del sistema.",
-                    fontSize = 13.sp,
-                    color = EditorialPalette.InkSoft,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    lineHeight = 18.sp
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .background(EditorialPalette.Ink, RoundedCornerShape(2.dp))
-                            .clickable { onGoGallery() },
-                        contentAlignment = Alignment.Center
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = "Abrir Galería",
-                            color = EditorialPalette.PaperInk,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
+                        Icon(
+                            imageVector = tab.icon,
+                            contentDescription = tab.label,
+                            tint = if (selected) EditorialPalette.Ink else EditorialPalette.Muted,
+                            modifier = Modifier.size(18.dp)
                         )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .border(1.dp, EditorialPalette.Ink, RoundedCornerShape(2.dp))
-                            .clickable { onBack() },
-                        contentAlignment = Alignment.Center
-                    ) {
                         Text(
-                            text = "Ir a Mesa",
-                            color = EditorialPalette.Ink,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
+                            text = tab.label,
+                            color = if (selected) EditorialPalette.Ink else EditorialPalette.Muted,
+                            fontFamily = EditorialType.MonoTypewriter,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 10.sp,
+                            letterSpacing = 0.8.sp
                         )
                     }
                 }
@@ -549,15 +721,13 @@ fun cleanIncomingUrl(raw: String): String {
 }
 
 /**
- * Resuelve enlaces de X/Twitter (incluyendo tweets sensibles +18 / NSFW o retweets que
- * el extractor sin cookies de yt-dlp bloquea con "No video could be found in this tweet")
+ * Resuelve enlaces de X/Twitter (incluyendo tweets sensibles +18 / NSFW o retweets)
  * usando las APIs públicas de FxTwitter / VxTwitter.
  */
 fun resolveTwitterDirectVideo(url: String, quality: QualityMode): Pair<String, String>? {
     val tweetId = Regex("""(?:x\.com|twitter\.com|fxtwitter\.com|vxtwitter\.com)/(?:[^/]+/)?status/(\d+)""", RegexOption.IGNORE_CASE)
         .find(url)?.groupValues?.getOrNull(1) ?: return null
 
-    // 1. Intento vía FxTwitter API
     try {
         val conn = (java.net.URL("https://api.fxtwitter.com/Twitter/status/$tweetId").openConnection() as java.net.HttpURLConnection).apply {
             connectTimeout = 6000
@@ -600,7 +770,6 @@ fun resolveTwitterDirectVideo(url: String, quality: QualityMode): Pair<String, S
         Log.w("MultiDownloader", "FxTwitter fallback warning: ${e.message}")
     }
 
-    // 2. Respaldo vía VxTwitter API
     try {
         val conn = (java.net.URL("https://api.vxtwitter.com/Twitter/status/$tweetId").openConnection() as java.net.HttpURLConnection).apply {
             connectTimeout = 6000
@@ -632,14 +801,15 @@ enum class QualityMode(
     val headerNote: String,
     val footerNote: String
 ) {
-    BEST("Máxima", "MP4", "MEJOR VIDEO + AUDIO", "MP4 / mejor video + audio disponibles"),
-    HD720("1080p / 720p", "MP4", "HASTA 720P-1080P", "MP4 / descarga más liviana y rápida"),
-    AUDIO("Audio", "MP3", "SOLO AUDIO", "MP3 / alta fidelidad, solo audio")
+    BEST("Máxima", "MP4", "MEJOR VIDEO + AUDIO", "MP4 // mejor video + audio disponibles"),
+    HD720("1080p / 720p", "MP4", "HASTA 720P-1080P", "MP4 // descarga más liviana y rápida"),
+    AUDIO("Audio", "MP3", "SOLO AUDIO", "MP3 // alta fidelidad, solo audio")
 }
 
 @Composable
 fun DownloaderScreen(
     initialUrl: String,
+    autoStartSignal: Int,
     engineReady: Boolean,
     engineVersion: String,
     initialStatus: String,
@@ -647,12 +817,14 @@ fun DownloaderScreen(
     onOpenGallery: () -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
     var urlInput by remember(initialUrl) { mutableStateOf(initialUrl) }
     var inputFocused by remember { mutableStateOf(false) }
     var selectedQuality by remember { mutableStateOf(QualityMode.BEST) }
     var isDownloading by remember { mutableStateOf(false) }
+    var activeDownloadUrl by remember { mutableStateOf("") }
     var isUpdating by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     var etaSeconds by remember { mutableLongStateOf(-1L) }
@@ -661,10 +833,22 @@ fun DownloaderScreen(
     var showLogs by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var completedDownload by remember { mutableStateOf<CompletedDownload?>(null) }
-    var activeSubTab by remember { mutableIntStateOf(0) } // 0 = RECIENTES, 1 = EN COLA
+    var activeSubTab by remember { mutableIntStateOf(0) }
     var recentMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var downloadQueue by remember { mutableStateOf<List<QueuedItem>>(emptyList()) }
+    var lastHandledShareSignal by remember { mutableIntStateOf(0) }
 
     val processId = remember { "MultiVideoDownload_${System.currentTimeMillis()}" }
+
+    val currentStamp = remember(urlInput) { detectPlatformStamp(urlInput) }
+    val activeStamp = remember(activeDownloadUrl) { detectPlatformStamp(activeDownloadUrl) }
+
+    // Vibración háptica tipo golpe de sello cuando detecta un link nuevo
+    LaunchedEffect(currentStamp?.mainStamp, currentStamp?.bottomCode) {
+        if (currentStamp != null) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+    }
 
     LaunchedEffect(completedDownload, isDownloading) {
         withContext(Dispatchers.IO) {
@@ -675,16 +859,11 @@ fun DownloaderScreen(
         }
     }
 
-    fun triggerDownload() {
-        val targetUrl = cleanIncomingUrl(urlInput.trim())
-        if (targetUrl.isEmpty() || !targetUrl.startsWith("http")) {
-            errorMessage = "Pega un enlace válido que empiece con https://..."
-            return
-        }
-
+    fun executeDownloadNow(targetUrl: String, qualityToUse: QualityMode) {
         errorMessage = null
         completedDownload = null
         isDownloading = true
+        activeDownloadUrl = targetUrl
         progress = 0f
         etaSeconds = -1L
         statusText = "Analizando enlace y buscando streams..."
@@ -701,8 +880,8 @@ fun DownloaderScreen(
                 }
                 stagingDir.listFiles()?.forEach { it.delete() }
 
-                val isAudioOnly = selectedQuality == QualityMode.AUDIO
-                val twitterResolved = resolveTwitterDirectVideo(targetUrl, selectedQuality)
+                val isAudioOnly = qualityToUse == QualityMode.AUDIO
+                val twitterResolved = resolveTwitterDirectVideo(targetUrl, qualityToUse)
                 val effectiveUrl = twitterResolved?.first ?: targetUrl
                 val outputTemplate = if (twitterResolved != null) {
                     "${stagingDir.absolutePath}/${twitterResolved.second}.%(ext)s"
@@ -719,7 +898,7 @@ fun DownloaderScreen(
                     addOption("--fragment-retries", "5")
                     addOption("--concurrent-fragments", "4")
 
-                    when (selectedQuality) {
+                    when (qualityToUse) {
                         QualityMode.BEST -> {
                             addOption("-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b")
                             addOption("--merge-output-format", "mp4")
@@ -771,6 +950,7 @@ fun DownloaderScreen(
                     withContext(Dispatchers.Main) {
                         isDownloading = false
                         progress = 1f
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         completedDownload = CompletedDownload(
                             title = savedFile.name,
                             sizeText = sizeMb,
@@ -797,6 +977,49 @@ fun DownloaderScreen(
         }
     }
 
+    // Procesar automáticamente el siguiente elemento en cola cuando termine la descarga activa
+    LaunchedEffect(isDownloading, downloadQueue.size, engineReady) {
+        if (engineReady && !isDownloading && downloadQueue.isNotEmpty()) {
+            val next = downloadQueue.first()
+            downloadQueue = downloadQueue.drop(1)
+            executeDownloadNow(next.url, next.quality)
+        }
+    }
+
+    // Auto-descarga al compartir desde X / IG / TikTok hacia MultiVideo
+    LaunchedEffect(autoStartSignal, engineReady) {
+        if (engineReady && autoStartSignal > lastHandledShareSignal) {
+            lastHandledShareSignal = autoStartSignal
+            val clean = cleanIncomingUrl(initialUrl)
+            if (clean.startsWith("http")) {
+                urlInput = clean
+                if (!isDownloading) {
+                    executeDownloadNow(clean, selectedQuality)
+                } else {
+                    val stamp = detectPlatformStamp(clean) ?: StampSpec("COLA", "★ WEB ★", "EN COLA", EditorialPalette.Ink)
+                    downloadQueue = downloadQueue + QueuedItem(System.currentTimeMillis(), clean, selectedQuality, stamp)
+                }
+            }
+        }
+    }
+
+    fun onMainActionClick() {
+        val targetUrl = cleanIncomingUrl(urlInput.trim())
+        if (targetUrl.isEmpty() || !targetUrl.startsWith("http")) {
+            errorMessage = "Pega un enlace válido que empiece con https://..."
+            return
+        }
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        if (!isDownloading) {
+            executeDownloadNow(targetUrl, selectedQuality)
+        } else {
+            val stamp = detectPlatformStamp(targetUrl) ?: StampSpec("COLA", "★ WEB ★", "EN COLA", EditorialPalette.Ink)
+            downloadQueue = downloadQueue + QueuedItem(System.currentTimeMillis(), targetUrl, selectedQuality, stamp)
+            urlInput = ""
+            activeSubTab = 1
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -813,9 +1036,9 @@ fun DownloaderScreen(
             Text(
                 text = "MESA DE DESCARGA",
                 color = EditorialPalette.Brick,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 10.sp,
+                fontFamily = EditorialType.MonoTypewriter,
+                fontWeight = FontWeight.Bold,
+                fontSize = 10.5.sp,
                 letterSpacing = 1.6.sp
             )
             HorizontalDivider(
@@ -827,54 +1050,66 @@ fun DownloaderScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Hero Headline
+        // Hero Headline con tipografía de Máquina de Escribir (Special Elite)
         Text(
             text = "Baja el video.\nSin rodeos.",
             color = EditorialPalette.Ink,
-            fontSize = 36.sp,
+            fontFamily = EditorialType.DisplayTypewriter,
+            fontSize = 35.sp,
             fontWeight = FontWeight.Bold,
-            lineHeight = 36.sp,
-            letterSpacing = (-1.2).sp
+            lineHeight = 38.sp,
+            letterSpacing = (-0.5).sp
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Lede
+        // Lede en Courier Prime
         Text(
             text = "Pega un enlace de Instagram, X, TikTok o Facebook. Se guarda en Descargas, en la mejor calidad disponible.",
             color = EditorialPalette.InkSoft,
-            fontSize = 13.5.sp,
-            lineHeight = 19.sp
+            fontFamily = EditorialType.MonoTypewriter,
+            fontSize = 12.5.sp,
+            lineHeight = 18.sp
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        // SECCIÓN 1: ENLACE
+        // SECCIÓN 1: ENLACE + SELLO TOP SECRET AL DETECTAR LINK
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Bottom
         ) {
-            Text(
-                text = "ENLACE",
-                color = EditorialPalette.Ink,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 10.sp,
-                letterSpacing = 1.2.sp
-            )
-            Text(
-                text = if (urlInput.isNotBlank()) "ENLACE LISTO" else "LISTO PARA PEGAR",
-                color = EditorialPalette.Muted,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 9.sp,
-                letterSpacing = 0.6.sp
-            )
+            Column {
+                Text(
+                    text = "ENLACE // EXPEDIENTE",
+                    color = EditorialPalette.Ink,
+                    fontFamily = EditorialType.MonoTypewriter,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.5.sp,
+                    letterSpacing = 1.2.sp
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = if (currentStamp != null) "ORIGEN IDENTIFICADO" else "ESPERANDO COORDENADAS",
+                    color = if (currentStamp != null) EditorialPalette.Brick else EditorialPalette.Muted,
+                    fontFamily = EditorialType.MonoTypewriter,
+                    fontSize = 9.sp,
+                    letterSpacing = 0.6.sp
+                )
+            }
+
+            if (currentStamp != null) {
+                TopSecretStamp(
+                    spec = currentStamp,
+                    compact = true
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(7.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Campo de texto estilo Editorial (con icono, input monospace, botón X y botón PEGAR integrado)
+        // Campo de texto estilo Máquina de escribir
         val fieldBorderColor = when {
             errorMessage != null -> EditorialPalette.Danger
             inputFocused -> EditorialPalette.Ink
@@ -906,7 +1141,7 @@ fun DownloaderScreen(
                     Text(
                         text = "https://...",
                         color = EditorialPalette.Muted.copy(alpha = 0.75f),
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = EditorialType.MonoTypewriter,
                         fontSize = 13.sp
                     )
                 }
@@ -916,11 +1151,10 @@ fun DownloaderScreen(
                         urlInput = it
                         if (errorMessage != null) errorMessage = null
                     },
-                    enabled = !isDownloading,
                     singleLine = true,
                     textStyle = TextStyle(
                         color = EditorialPalette.Ink,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = EditorialType.MonoTypewriter,
                         fontSize = 13.sp
                     ),
                     cursorBrush = SolidColor(EditorialPalette.Brick),
@@ -931,7 +1165,7 @@ fun DownloaderScreen(
                 )
             }
 
-            if (urlInput.isNotEmpty() && !isDownloading) {
+            if (urlInput.isNotEmpty()) {
                 IconButton(
                     onClick = {
                         urlInput = ""
@@ -948,7 +1182,6 @@ fun DownloaderScreen(
                 }
             }
 
-            // Divisor vertical + botón PEGAR
             Box(
                 modifier = Modifier
                     .width(1.dp)
@@ -959,7 +1192,7 @@ fun DownloaderScreen(
             Box(
                 modifier = Modifier
                     .height(42.dp)
-                    .clickable(enabled = !isDownloading) {
+                    .clickable {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         val pasted = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
                         if (!pasted.isNullOrBlank()) {
@@ -973,9 +1206,9 @@ fun DownloaderScreen(
                 Text(
                     text = "PEGAR",
                     color = EditorialPalette.Brick,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = EditorialType.MonoTypewriter,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp,
+                    fontSize = 10.5.sp,
                     letterSpacing = 1.sp
                 )
             }
@@ -984,10 +1217,10 @@ fun DownloaderScreen(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-            text = errorMessage ?: "Acepta enlaces públicos. Sin playlists.",
+            text = errorMessage ?: if (isDownloading) "Descarga activa: pega otro enlace para sumarlo a la cola." else "Acepta enlaces públicos. Al compartir desde otra app descarga directo.",
             color = if (errorMessage != null) EditorialPalette.Danger else EditorialPalette.Muted,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 10.sp
+            fontFamily = EditorialType.MonoTypewriter,
+            fontSize = 9.5.sp
         )
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -1001,15 +1234,15 @@ fun DownloaderScreen(
             Text(
                 text = "CALIDAD",
                 color = EditorialPalette.Ink,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 10.sp,
+                fontFamily = EditorialType.MonoTypewriter,
+                fontWeight = FontWeight.Bold,
+                fontSize = 10.5.sp,
                 letterSpacing = 1.2.sp
             )
             Text(
                 text = selectedQuality.headerNote,
                 color = EditorialPalette.Muted,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = EditorialType.MonoTypewriter,
                 fontSize = 9.sp,
                 letterSpacing = 0.6.sp
             )
@@ -1024,9 +1257,9 @@ fun DownloaderScreen(
             QualityMode.values().forEach { mode ->
                 val isSelected = selectedQuality == mode
                 val bg = if (isSelected) EditorialPalette.Ink else EditorialPalette.Raised
-                val borderCol = if (isSelected) EditorialPalette.Ink else EditorialPalette.Line
+                val borderCol = if (isSelected) EditorialPalette.Ink else EditorialPalette.LineStrong
                 val titleCol = if (isSelected) EditorialPalette.PaperInk else EditorialPalette.Ink
-                val subCol = if (isSelected) EditorialPalette.PaperInk.copy(alpha = 0.65f) else EditorialPalette.Muted
+                val subCol = if (isSelected) EditorialPalette.PaperInk.copy(alpha = 0.70f) else EditorialPalette.Muted
 
                 Column(
                     modifier = Modifier
@@ -1035,22 +1268,26 @@ fun DownloaderScreen(
                         .clip(RoundedCornerShape(2.dp))
                         .background(bg)
                         .border(1.dp, borderCol, RoundedCornerShape(2.dp))
-                        .clickable(enabled = !isDownloading) { selectedQuality = mode },
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            selectedQuality = mode
+                        },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
                     Text(
                         text = mode.shortTitle,
                         color = titleCol,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
-                        letterSpacing = (-0.2).sp
+                        fontFamily = EditorialType.DisplayTypewriter,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.5.sp
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = mode.badge,
                         color = subCol,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontWeight = FontWeight.Bold,
                         fontSize = 9.sp,
                         letterSpacing = 0.8.sp
                     )
@@ -1063,13 +1300,13 @@ fun DownloaderScreen(
         Text(
             text = selectedQuality.footerNote,
             color = EditorialPalette.Muted,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = EditorialType.MonoTypewriter,
             fontSize = 9.5.sp
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // SECCIÓN 3: DESTINO (con líneas punteadas arriba y abajo)
+        // SECCIÓN 3: DESTINO
         DashedDivider()
         Row(
             modifier = Modifier
@@ -1081,7 +1318,7 @@ fun DownloaderScreen(
             Text(
                 text = "GUARDAR EN",
                 color = EditorialPalette.Muted,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = EditorialType.MonoTypewriter,
                 fontSize = 9.5.sp,
                 letterSpacing = 0.8.sp
             )
@@ -1089,8 +1326,8 @@ fun DownloaderScreen(
             Text(
                 text = if (selectedQuality == QualityMode.AUDIO) "Música / MultiDownloader" else "Descargas / MultiVideo",
                 color = EditorialPalette.Ink,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
+                fontFamily = EditorialType.MonoTypewriter,
+                fontWeight = FontWeight.Bold,
                 fontSize = 11.sp,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
@@ -1107,14 +1344,13 @@ fun DownloaderScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // SECCIÓN 4: BOTÓN CTA PRINCIPAL (Ladrillo con sombra sólida #8E2C17 y divisor vertical)
-        val ctaEnabled = engineReady && !isDownloading && !isUpdating
+        // SECCIÓN 4: BOTÓN CTA PRINCIPAL (Permite encolar si ya está descargando)
+        val ctaEnabled = engineReady && !isUpdating
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(61.dp)
         ) {
-            // Sombra inferior sólida de 3dp
             if (ctaEnabled) {
                 Box(
                     modifier = Modifier
@@ -1131,18 +1367,20 @@ fun DownloaderScreen(
                     .align(Alignment.TopCenter)
                     .clip(RoundedCornerShape(2.dp))
                     .background(if (ctaEnabled) EditorialPalette.Brick else EditorialPalette.DisabledBg)
-                    .clickable(enabled = ctaEnabled) { triggerDownload() },
+                    .clickable(enabled = ctaEnabled) { onMainActionClick() },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = when {
-                        isDownloading -> "Descargando…"
+                        isDownloading -> "Añadir a la cola (+1)"
                         selectedQuality == QualityMode.AUDIO -> "Descargar audio"
                         else -> "Descargar video"
                     },
                     color = if (ctaEnabled) EditorialPalette.PaperInk else EditorialPalette.DisabledFg,
-                    fontSize = 15.sp,
+                    fontFamily = EditorialType.DisplayTypewriter,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
                     modifier = Modifier
                         .weight(1f)
                         .padding(horizontal = 18.dp)
@@ -1174,7 +1412,6 @@ fun DownloaderScreen(
 
         Spacer(modifier = Modifier.height(9.dp))
 
-        // Micro-meta row
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1182,7 +1419,8 @@ fun DownloaderScreen(
             Text(
                 text = selectedQuality.badge,
                 color = EditorialPalette.Muted,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = EditorialType.MonoTypewriter,
+                fontWeight = FontWeight.Bold,
                 fontSize = 9.sp,
                 letterSpacing = 0.8.sp
             )
@@ -1190,7 +1428,7 @@ fun DownloaderScreen(
             Text(
                 text = "AUDIO ORIGINAL",
                 color = EditorialPalette.Muted,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = EditorialType.MonoTypewriter,
                 fontSize = 9.sp,
                 letterSpacing = 0.8.sp
             )
@@ -1198,13 +1436,13 @@ fun DownloaderScreen(
             Text(
                 text = "SIN CUENTA",
                 color = EditorialPalette.Muted,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = EditorialType.MonoTypewriter,
                 fontSize = 9.sp,
                 letterSpacing = 0.8.sp
             )
         }
 
-        // SECCIÓN 5: SLOT DE PROGRESO (TICKET DE DESCARGA / SELLO GUARDADO / TARJETA DE ERROR)
+        // SECCIÓN 5: SLOT DE PROGRESO / SELLO TOP SECRET GUARDADO / ERROR
         if (isDownloading) {
             Spacer(modifier = Modifier.height(16.dp))
             val pct = (progress * 100).toInt().coerceIn(0, 100)
@@ -1221,18 +1459,18 @@ fun DownloaderScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "DESCARGANDO",
+                        text = if (downloadQueue.isNotEmpty()) "DESCARGANDO (+${downloadQueue.size} EN COLA)" else "DESCARGANDO // EXPEDIENTE",
                         color = EditorialPalette.Brick,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = EditorialType.MonoTypewriter,
                         fontWeight = FontWeight.Bold,
                         fontSize = 9.5.sp,
-                        letterSpacing = 1.5.sp
+                        letterSpacing = 1.3.sp
                     )
                     Text(
                         text = "CANCELAR",
                         color = EditorialPalette.InkSoft,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Medium,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontWeight = FontWeight.Bold,
                         fontSize = 9.5.sp,
                         textDecoration = TextDecoration.Underline,
                         letterSpacing = 1.sp,
@@ -1244,7 +1482,7 @@ fun DownloaderScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1255,38 +1493,43 @@ fun DownloaderScreen(
                         Text(
                             text = "$pct",
                             color = EditorialPalette.Ink,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 42.sp,
-                            letterSpacing = (-2).sp
+                            fontFamily = EditorialType.DisplayTypewriter,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 42.sp
                         )
                         Text(
                             text = "%",
                             color = EditorialPalette.Ink,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 18.sp,
-                            modifier = Modifier.padding(bottom = 6.dp, start = 2.dp)
+                            fontFamily = EditorialType.DisplayTypewriter,
+                            fontSize = 20.sp,
+                            modifier = Modifier.padding(bottom = 6.dp, start = 3.dp)
                         )
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = if (etaSeconds > 0) "ETA ${etaSeconds}s" else "PROCESANDO STREAM",
-                            color = EditorialPalette.InkSoft,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp
+                    if (activeStamp != null) {
+                        TopSecretStamp(
+                            spec = activeStamp,
+                            compact = true
                         )
-                        Text(
-                            text = selectedQuality.shortTitle,
-                            color = EditorialPalette.Muted,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 9.sp
-                        )
+                    } else {
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = if (etaSeconds > 0) "ETA ${etaSeconds}s" else "EXTRAYENDO STREAM",
+                                color = EditorialPalette.InkSoft,
+                                fontFamily = EditorialType.MonoTypewriter,
+                                fontSize = 10.sp
+                            )
+                            Text(
+                                text = selectedQuality.shortTitle,
+                                color = EditorialPalette.Muted,
+                                fontFamily = EditorialType.MonoTypewriter,
+                                fontSize = 9.sp
+                            )
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Barra de progreso ladrillo
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1306,8 +1549,8 @@ fun DownloaderScreen(
                     Text(
                         text = logOutput,
                         color = EditorialPalette.InkSoft,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.5.sp,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontSize = 9.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1324,13 +1567,13 @@ fun DownloaderScreen(
                     Text(
                         text = "Guardando en Descargas / MultiVideo",
                         color = EditorialPalette.Muted,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = EditorialType.MonoTypewriter,
                         fontSize = 9.sp
                     )
                     Text(
                         text = selectedQuality.badge,
                         color = EditorialPalette.Muted,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = EditorialType.MonoTypewriter,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1351,50 +1594,37 @@ fun DownloaderScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.Top
                 ) {
-                    // Sello verde rotado "✓ LISTO"
-                    Row(
-                        modifier = Modifier
-                            .rotate(-3.5f)
-                            .background(EditorialPalette.SuccessTint, RoundedCornerShape(2.dp))
-                            .border(2.dp, EditorialPalette.Success, RoundedCornerShape(2.dp))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = EditorialPalette.Success,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "LISTO",
-                            color = EditorialPalette.Success,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            letterSpacing = 1.6.sp
-                        )
-                    }
+                    // Sello Top Secret Desclasificado / Guardado
+                    TopSecretStamp(
+                        spec = StampSpec(
+                            topSerial = "DESCLASIFICADO // ARCHIVO",
+                            mainStamp = "★ GUARDADO ★",
+                            bottomCode = "${done.sizeText} // EN GALERÍA",
+                            inkColor = EditorialPalette.Success,
+                            tiltDegrees = -3.8f
+                        ),
+                        compact = false
+                    )
 
                     Text(
-                        text = "ARCHIVO",
+                        text = "EXPEDIENTE OK",
                         color = EditorialPalette.Muted,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 9.5.sp,
-                        letterSpacing = 1.2.sp,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp,
+                        letterSpacing = 1.1.sp,
                         modifier = Modifier.padding(top = 6.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
                     text = done.title,
                     color = EditorialPalette.Ink,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.5.sp,
+                    fontFamily = EditorialType.MonoTypewriter,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1402,9 +1632,9 @@ fun DownloaderScreen(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "${done.sizeText} / Descargas / MultiVideo",
+                    text = "${done.sizeText} // Descargas / MultiVideo",
                     color = EditorialPalette.Muted,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = EditorialType.MonoTypewriter,
                     fontSize = 9.5.sp
                 )
 
@@ -1429,11 +1659,44 @@ fun DownloaderScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Abrir archivo",
+                            text = "Abrir",
                             color = EditorialPalette.PaperInk,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
+                            fontFamily = EditorialType.MonoTypewriter,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp
                         )
+                    }
+
+                    if (done.uri != null) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                                .background(EditorialPalette.Brick, RoundedCornerShape(2.dp))
+                                .clickable {
+                                    shareMediaUri(context, done.uri, done.isAudio)
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = null,
+                                    tint = EditorialPalette.PaperInk,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Compartir",
+                                    color = EditorialPalette.PaperInk,
+                                    fontFamily = EditorialType.MonoTypewriter,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                        }
                     }
 
                     Box(
@@ -1449,10 +1712,11 @@ fun DownloaderScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Otra descarga",
+                            text = "Limpiar",
                             color = EditorialPalette.Ink,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
+                            fontFamily = EditorialType.MonoTypewriter,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp
                         )
                     }
                 }
@@ -1477,9 +1741,10 @@ fun DownloaderScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "No pudimos completar la descarga",
+                        text = "FALLO EN EXTRACCIÓN",
                         color = EditorialPalette.Danger,
-                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = EditorialType.DisplayTypewriter,
+                        fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
                 }
@@ -1489,7 +1754,8 @@ fun DownloaderScreen(
                 Text(
                     text = errorMessage ?: "",
                     color = Color(0xFF6E2A1E),
-                    fontSize = 11.5.sp,
+                    fontFamily = EditorialType.MonoTypewriter,
+                    fontSize = 11.sp,
                     lineHeight = 16.sp
                 )
 
@@ -1502,17 +1768,17 @@ fun DownloaderScreen(
                     Text(
                         text = "REINTENTAR",
                         color = EditorialPalette.Danger,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = EditorialType.MonoTypewriter,
                         fontWeight = FontWeight.Bold,
                         fontSize = 10.sp,
                         letterSpacing = 1.sp,
                         textDecoration = TextDecoration.Underline,
-                        modifier = Modifier.clickable { triggerDownload() }
+                        modifier = Modifier.clickable { onMainActionClick() }
                     )
                     Text(
                         text = if (showLogs) "OCULTAR LOG ▲" else "VER DETALLES ▼",
                         color = EditorialPalette.InkSoft,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = EditorialType.MonoTypewriter,
                         fontSize = 9.5.sp,
                         modifier = Modifier.clickable { showLogs = !showLogs }
                     )
@@ -1523,8 +1789,8 @@ fun DownloaderScreen(
                     Text(
                         text = logOutput,
                         color = EditorialPalette.InkSoft,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontSize = 9.5.sp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(EditorialPalette.Raised, RoundedCornerShape(2.dp))
@@ -1537,6 +1803,7 @@ fun DownloaderScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         // SECCIÓN 6: PESTAÑAS RECIENTES / EN COLA
+        val totalInQueue = (if (isDownloading) 1 else 0) + downloadQueue.size
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(20.dp),
@@ -1550,7 +1817,7 @@ fun DownloaderScreen(
             )
             EditorialSubTab(
                 title = "EN COLA",
-                count = if (isDownloading) 1 else 0,
+                count = totalInQueue,
                 selected = activeSubTab == 1,
                 onClick = { activeSubTab = 1 }
             )
@@ -1571,14 +1838,16 @@ fun DownloaderScreen(
                     Text(
                         text = "Todavía no hay descargas",
                         color = EditorialPalette.Ink,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp
+                        fontFamily = EditorialType.DisplayTypewriter,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Pega tu primer enlace arriba. Aquí aparecerá el archivo cuando termine.",
                         color = EditorialPalette.Muted,
-                        fontSize = 11.5.sp,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontSize = 11.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
@@ -1602,18 +1871,17 @@ fun DownloaderScreen(
                                 )
                                 .border(
                                     1.dp,
-                                    if (item.isVideo) EditorialPalette.Line else EditorialPalette.Success.copy(alpha = 0.35f),
+                                    if (item.isVideo) EditorialPalette.LineStrong else EditorialPalette.Success.copy(alpha = 0.45f),
                                     RoundedCornerShape(2.dp)
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = extLabel,
-                                color = if (item.isVideo) EditorialPalette.InkSoft else EditorialPalette.Success,
-                                fontFamily = FontFamily.Monospace,
+                                color = if (item.isVideo) EditorialPalette.Ink else EditorialPalette.Success,
+                                fontFamily = EditorialType.DisplayTypewriter,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 9.sp,
-                                letterSpacing = 0.6.sp
+                                fontSize = 10.sp
                             )
                         }
 
@@ -1623,8 +1891,9 @@ fun DownloaderScreen(
                             Text(
                                 text = item.name,
                                 color = EditorialPalette.Ink,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.5.sp,
+                                fontFamily = EditorialType.MonoTypewriter,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1632,14 +1901,26 @@ fun DownloaderScreen(
                             Text(
                                 text = "${String.format(Locale.US, "%.1f MB", item.sizeMb)} · ${dateFormat.format(Date(item.dateAddedMs))}",
                                 color = EditorialPalette.Muted,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = EditorialType.MonoTypewriter,
                                 fontSize = 9.5.sp
                             )
                         }
 
                         IconButton(
+                            onClick = { shareMediaUri(context, item.uri, !item.isVideo) },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Compartir",
+                                tint = EditorialPalette.Brick,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+
+                        IconButton(
                             onClick = { openMediaUri(context, item.uri, !item.isVideo) },
-                            modifier = Modifier.size(38.dp)
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.OpenInNew,
@@ -1653,28 +1934,132 @@ fun DownloaderScreen(
                 }
             }
         } else {
-            Spacer(modifier = Modifier.height(12.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, EditorialPalette.LineStrong, RoundedCornerShape(2.dp))
-                    .background(EditorialPalette.Raised.copy(alpha = 0.5f), RoundedCornerShape(2.dp))
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = if (isDownloading) "1 descarga activa en curso (${(progress * 100).toInt()}%)" else "Nada en cola",
-                    color = EditorialPalette.Ink,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.sp
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Los enlaces aparecen aquí mientras se descargan. De uno en uno, sin ruido.",
-                    color = EditorialPalette.Muted,
-                    fontSize = 11.5.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
+            if (!isDownloading && downloadQueue.isEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, EditorialPalette.LineStrong, RoundedCornerShape(2.dp))
+                        .background(EditorialPalette.Raised.copy(alpha = 0.5f), RoundedCornerShape(2.dp))
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Nada en cola",
+                        color = EditorialPalette.Ink,
+                        fontFamily = EditorialType.DisplayTypewriter,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Mientras se descarga un video puedes pegar más enlaces arriba y tocar «Añadir a la cola».",
+                        color = EditorialPalette.Muted,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontSize = 11.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            } else {
+                if (isDownloading) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(EditorialPalette.Brick, RoundedCornerShape(2.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${(progress * 100).toInt()}%",
+                                color = EditorialPalette.PaperInk,
+                                fontFamily = EditorialType.MonoTypewriter,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 9.5.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = activeDownloadUrl,
+                                color = EditorialPalette.Ink,
+                                fontFamily = EditorialType.MonoTypewriter,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "ACTIVO AHORA · ${activeStamp?.mainStamp ?: "DESCARGANDO"}",
+                                color = EditorialPalette.Brick,
+                                fontFamily = EditorialType.MonoTypewriter,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                    HorizontalDivider(thickness = 1.dp, color = EditorialPalette.Line)
+                }
+
+                downloadQueue.forEachIndexed { idx, qItem ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(EditorialPalette.Raised, RoundedCornerShape(2.dp))
+                                .border(1.dp, EditorialPalette.LineStrong, RoundedCornerShape(2.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "#${idx + 1}",
+                                color = EditorialPalette.Ink,
+                                fontFamily = EditorialType.DisplayTypewriter,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = qItem.url,
+                                color = EditorialPalette.Ink,
+                                fontFamily = EditorialType.MonoTypewriter,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${qItem.stamp.mainStamp} · ${qItem.quality.shortTitle}",
+                                color = EditorialPalette.Muted,
+                                fontFamily = EditorialType.MonoTypewriter,
+                                fontSize = 9.sp
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                downloadQueue = downloadQueue.filterNot { it.id == qItem.id }
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Quitar de cola",
+                                tint = EditorialPalette.Danger,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    HorizontalDivider(thickness = 1.dp, color = EditorialPalette.Line)
+                }
             }
         }
 
@@ -1699,7 +2084,7 @@ fun DownloaderScreen(
                 Text(
                     text = "MOTOR YT-DLP",
                     color = EditorialPalette.Ink,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = EditorialType.MonoTypewriter,
                     fontWeight = FontWeight.Bold,
                     fontSize = 9.5.sp,
                     letterSpacing = 1.1.sp
@@ -1707,7 +2092,7 @@ fun DownloaderScreen(
                 Text(
                     text = statusText,
                     color = EditorialPalette.Muted,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = EditorialType.MonoTypewriter,
                     fontSize = 9.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1761,8 +2146,8 @@ fun DownloaderScreen(
                     Text(
                         text = if (isUpdating) "ACTUALIZANDO…" else "ACTUALIZAR",
                         color = EditorialPalette.InkSoft,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontWeight = FontWeight.Bold,
                         fontSize = 9.sp,
                         letterSpacing = 0.8.sp
                     )
@@ -1775,7 +2160,7 @@ fun DownloaderScreen(
         Text(
             text = "Descarga solo contenido público. Respeta los derechos de autor y las condiciones de cada plataforma.",
             color = EditorialPalette.Muted,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = EditorialType.MonoTypewriter,
             fontSize = 8.5.sp,
             lineHeight = 13.sp
         )
@@ -1800,22 +2185,22 @@ fun EditorialSubTab(
             Text(
                 text = title,
                 color = if (selected) EditorialPalette.Ink else EditorialPalette.Muted,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                fontFamily = EditorialType.MonoTypewriter,
+                fontWeight = FontWeight.Bold,
                 fontSize = 10.sp,
                 letterSpacing = 1.sp
             )
             Text(
                 text = "$count",
                 color = if (selected) EditorialPalette.Brick else EditorialPalette.Muted,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = EditorialType.MonoTypewriter,
                 fontWeight = FontWeight.Bold,
                 fontSize = 9.5.sp
             )
         }
         Box(
             modifier = Modifier
-                .width(76.dp)
+                .width(82.dp)
                 .height(2.dp)
                 .background(if (selected) EditorialPalette.Ink else Color.Transparent)
         )
@@ -1849,6 +2234,20 @@ fun openMediaUri(context: Context, uri: Uri, isAudio: Boolean) {
         context.startActivity(intent)
     } catch (e: Exception) {
         Log.e("MultiDownloader", "No se pudo abrir archivo: ${e.message}")
+    }
+}
+
+fun shareMediaUri(context: Context, uri: Uri, isAudio: Boolean) {
+    try {
+        val mime = if (isAudio) "audio/*" else "video/*"
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Compartir archivo"))
+    } catch (e: Exception) {
+        Log.e("MultiDownloader", "No se pudo compartir archivo: ${e.message}")
     }
 }
 

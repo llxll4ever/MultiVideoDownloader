@@ -96,12 +96,32 @@ class MainActivity : ComponentActivity() {
                 FFmpeg.getInstance().init(applicationContext)
                 Aria2c.getInstance().init(applicationContext)
 
-                val version = getInstalledYtDlpVersion()
+                var version = getInstalledYtDlpVersion()
 
                 runOnUiThread {
                     engineReadyState.value = true
                     engineVersionState.value = version
-                    statusMessageState.value = "Motor listo (yt-dlp $version)."
+                    statusMessageState.value = if (version.startsWith("2025.")) {
+                        "Motor listo (actualizando yt-dlp $version en segundo plano...)"
+                    } else {
+                        "Motor listo (yt-dlp $version)."
+                    }
+                }
+
+                if (version.startsWith("2025.")) {
+                    try {
+                        YoutubeDL.getInstance().updateYoutubeDL(
+                            applicationContext,
+                            YoutubeDL.UpdateChannel.STABLE
+                        )
+                        version = getInstalledYtDlpVersion()
+                        runOnUiThread {
+                            engineVersionState.value = version
+                            statusMessageState.value = "Motor actualizado y listo (yt-dlp $version)."
+                        }
+                    } catch (uEx: Exception) {
+                        Log.w("MultiDownloader", "Auto-update de yt-dlp omitido: ${uEx.message}")
+                    }
                 }
             } catch (e: YoutubeDLException) {
                 Log.e("MultiDownloader", "Error inicializando librerías nativas", e)
@@ -258,7 +278,7 @@ fun PlayerLauncherScreen(onBack: () -> Unit) {
 }
 
 fun cleanIncomingUrl(raw: String): String {
-    val regex = "(https?://[^\\\\s]+)".toRegex()
+    val regex = Regex("""(https?://\S+)""")
     val match = regex.find(raw)?.value ?: raw.trim()
     return match.trimEnd('/', ' ', '\n', '\r')
 }

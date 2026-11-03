@@ -283,6 +283,85 @@ fun cleanIncomingUrl(raw: String): String {
     return match.trimEnd('/', ' ', '\n', '\r')
 }
 
+/**
+ * Resuelve enlaces de X/Twitter (incluyendo tweets sensibles +18 / NSFW o retweets que
+ * el extractor sin cookies de yt-dlp bloquea con "No video could be found in this tweet")
+ * usando las APIs públicas de FxTwitter / VxTwitter.
+ * Retorna Pair(directVideoUrl, fileStem) o null si no aplica.
+ */
+fun resolveTwitterDirectVideo(url: String, quality: QualityMode): Pair<String, String>? {
+    val tweetId = Regex("""(?:x\.com|twitter\.com|fxtwitter\.com|vxtwitter\.com)/(?:[^/]+/)?status/(\d+)""", RegexOption.IGNORE_CASE)
+        .find(url)?.groupValues?.getOrNull(1) ?: return null
+
+    // 1. Intento vía FxTwitter API
+    try {
+        val conn = (java.net.URL("https://api.fxtwitter.com/Twitter/status/$tweetId").openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 6000
+            readTimeout = 6000
+            setRequestProperty("User-Agent", "MultiVideoDownloader/1.1")
+        }
+        if (conn.responseCode == 200) {
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val root = org.json.JSONObject(body)
+            val tweet = root.optJSONObject("tweet")
+            val author = tweet?.optJSONObject("author")?.optString("screen_name", "x_video") ?: "x_video"
+            val videos = tweet?.optJSONObject("media")?.optJSONArray("videos")
+            if (videos != null && videos.length() > 0) {
+                val vidObj = videos.getJSONObject(0)
+                var chosenUrl = vidObj.optString("url", "")
+                if (quality == QualityMode.HD720) {
+                    val variants = vidObj.optJSONArray("variants")
+                    if (variants != null) {
+                        var bestBitrate = -1
+                        for (i in 0 until variants.length()) {
+                            val v = variants.getJSONObject(i)
+                            val ctype = v.optString("content_type", "")
+                            val vUrl = v.optString("url", "")
+                            val br = v.optInt("bitrate", 0)
+                            if (ctype == "video/mp4" && (vUrl.contains("720") || vUrl.contains("600x") || vUrl.contains("480") || br in 1..2500000)) {
+                                if (br > bestBitrate) {
+                                    bestBitrate = br
+                                    chosenUrl = vUrl
+                                }
+                            }
+                        }
+                    }
+                }
+                if (chosenUrl.startsWith("http")) {
+                    return Pair(chosenUrl, "${author}_${tweetId}")
+                }
+            }
+        }
+    } catch (e: Exception) {
+        Log.w("MultiDownloader", "FxTwitter fallback warning: ${e.message}")
+    }
+
+    // 2. Respaldo vía VxTwitter API
+    try {
+        val conn = (java.net.URL("https://api.vxtwitter.com/Twitter/status/$tweetId").openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 6000
+            readTimeout = 6000
+            setRequestProperty("User-Agent", "MultiVideoDownloader/1.1")
+        }
+        if (conn.responseCode == 200) {
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val root = org.json.JSONObject(body)
+            val author = root.optString("user_screen_name", "x_video")
+            val mediaUrls = root.optJSONArray("mediaURLs")
+            if (mediaUrls != null && mediaUrls.length() > 0) {
+                val chosenUrl = mediaUrls.optString(0, "")
+                if (chosenUrl.startsWith("http")) {
+                    return Pair(chosenUrl, "${author}_${tweetId}")
+                }
+            }
+        }
+    } catch (e: Exception) {
+        Log.w("MultiDownloader", "VxTwitter fallback warning: ${e.message}")
+    }
+
+    return null
+}
+
 enum class QualityMode(val label: String, val subtitle: String) {
     BEST("Máxima (1080p+)", "Mejor calidad disponible"),
     HD720("720p", "Descarga rápida y ligera"),
@@ -505,8 +584,15 @@ fun DownloaderScreen(
                         stagingDir.listFiles()?.forEach { it.delete() }
 
                         val isAudioOnly = selectedQuality == QualityMode.AUDIO
+                        val twitterResolved = resolveTwitterDirectVideo(targetUrl, selectedQuality)
+                        val effectiveUrl = twitterResolved?.first ?: targetUrl
+                        val outputTemplate = if (twitterResolved != null) {
+                            "${stagingDir.absolutePath}/${twitterResolved.second}.%(ext)s"
+                        } else {
+                            "${stagingDir.absolutePath}/%(title).90s_%(id)s.%(ext)s"
+                        }
 
-                        val request = YoutubeDLRequest(targetUrl).apply {
+                        val request = YoutubeDLRequest(effectiveUrl).apply {
                             addOption("--no-mtime")
                             addOption("--no-playlist")
                             addOption("--no-check-certificates")
@@ -531,7 +617,7 @@ fun DownloaderScreen(
                                 }
                             }
 
-                            addOption("-o", "${stagingDir.absolutePath}/%(title).90s_%(id)s.%(ext)s")
+                            addOption("-o", outputTemplate)
                         }
 
                         var lastLine = ""

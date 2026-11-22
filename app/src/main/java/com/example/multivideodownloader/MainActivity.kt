@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -2234,6 +2235,11 @@ fun openMediaUri(context: Context, uri: Uri, isAudio: Boolean) {
         context.startActivity(intent)
     } catch (e: Exception) {
         Log.e("MultiDownloader", "No se pudo abrir archivo: ${e.message}")
+        Toast.makeText(
+            context,
+            "No hay una app instalada para reproducir este archivo.",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 }
 

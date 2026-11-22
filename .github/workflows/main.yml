@@ -27,6 +27,16 @@ jobs:
       - name: Aceptar licencias del SDK
         run: yes | sdkmanager --licenses || true
 
+      - name: Restaurar keystore debug compartido (si está configurado)
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_B64" ]; then
+            mkdir -p "$HOME/.android"
+            echo "$DEBUG_KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+            echo "Restored shared debug.keystore"
+          fi
+
       - name: Configurar Gradle y compilar APK Debug
         uses: gradle/actions/setup-gradle@v3
         with:

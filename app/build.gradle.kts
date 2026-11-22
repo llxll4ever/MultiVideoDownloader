@@ -11,8 +11,8 @@ android {
  applicationId = "com.example.multivideodownloader"
  minSdk = 26
  targetSdk = 34
- versionCode = 3
- versionName = "1.2.0"
+ versionCode = 4
+ versionName = "1.3.0"
 
  ndk {
  abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -77,8 +77,9 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // Coil for async image loading (thumbnails in gallery)
+    // Coil for async image loading + video frame thumbnails in gallery
     implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("io.coil-kt:coil-video:2.6.0")
 
     implementation("io.github.junkfood02.youtubedl-android:library:$youtubedlAndroid")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlAndroid")

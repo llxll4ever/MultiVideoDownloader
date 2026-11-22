@@ -6,11 +6,11 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Spring
@@ -28,11 +28,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -58,6 +59,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -69,13 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import com.yausername.aria2c.Aria2c
-import com.yausername.ffmpeg.FFmpeg
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLException
-import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
@@ -393,67 +389,21 @@ fun TopSecretStamp(
 class MainActivity : ComponentActivity() {
 
     private var sharedUrlState = mutableStateOf("")
-    private var autoStartSignalState = mutableIntStateOf(0)
-    private var engineReadyState = mutableStateOf(false)
-    private var engineVersionState = mutableStateOf("cargando...")
-    private var statusMessageState = mutableStateOf("Inicializando motor yt-dlp + FFmpeg...")
+    private var selectedQualityState = mutableStateOf(QualityMode.BEST)
     private var selectedTab = mutableStateOf(TabItem.DOWNLOADS)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ -> }
+    ) { _ ->
+        DownloadController.notifyMediaChanged()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         requestNeededPermissions()
+        DownloadController.ensureEngineInitialized(applicationContext)
         handleIncomingShareIntent(intent)
-
-        Thread {
-            try {
-                YoutubeDL.getInstance().init(applicationContext)
-                FFmpeg.getInstance().init(applicationContext)
-                Aria2c.getInstance().init(applicationContext)
-
-                var version = getInstalledYtDlpVersion()
-
-                runOnUiThread {
-                    engineReadyState.value = true
-                    engineVersionState.value = version
-                    statusMessageState.value = if (version.startsWith("2025.")) {
-                        "Actualizando yt-dlp ($version) en 2do plano..."
-                    } else {
-                        "Canal estable / yt-dlp $version"
-                    }
-                }
-
-                if (version.startsWith("2025.")) {
-                    try {
-                        YoutubeDL.getInstance().updateYoutubeDL(
-                            applicationContext,
-                            YoutubeDL.UpdateChannel.STABLE
-                        )
-                        version = getInstalledYtDlpVersion()
-                        runOnUiThread {
-                            engineVersionState.value = version
-                            statusMessageState.value = "Canal estable / yt-dlp $version"
-                        }
-                    } catch (uEx: Exception) {
-                        Log.w("MultiDownloader", "Auto-update de yt-dlp omitido: ${uEx.message}")
-                    }
-                }
-            } catch (e: YoutubeDLException) {
-                Log.e("MultiDownloader", "Error inicializando librerías nativas", e)
-                runOnUiThread {
-                    statusMessageState.value = "Error al iniciar motor: ${e.localizedMessage}"
-                }
-            } catch (e: Exception) {
-                Log.e("MultiDownloader", "Error inesperado al iniciar", e)
-                runOnUiThread {
-                    statusMessageState.value = "Error: ${e.localizedMessage}"
-                }
-            }
-        }.start()
 
         setContent {
             val view = LocalView.current
@@ -468,6 +418,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            val uiState by DownloadController.state.collectAsState()
+
             MaterialTheme(
                 colorScheme = editorialColorScheme(),
                 typography = editorialTypography()
@@ -478,7 +430,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
                         EditorialTopBar(
-                            engineReady = engineReadyState.value
+                            engineReady = uiState.engineReady
                         )
 
                         Box(
@@ -489,18 +441,16 @@ class MainActivity : ComponentActivity() {
                             when (selectedTab.value) {
                                 TabItem.DOWNLOADS -> DownloaderScreen(
                                     initialUrl = sharedUrlState.value,
-                                    autoStartSignal = autoStartSignalState.intValue,
-                                    engineReady = engineReadyState.value,
-                                    engineVersion = engineVersionState.value,
-                                    initialStatus = statusMessageState.value,
-                                    onVersionUpdated = { newVer ->
-                                        engineVersionState.value = newVer
-                                    },
+                                    selectedQuality = selectedQualityState.value,
+                                    onSelectQuality = { selectedQualityState.value = it },
+                                    uiState = uiState,
                                     onOpenGallery = {
                                         selectedTab.value = TabItem.GALLERY
                                     }
                                 )
-                                TabItem.GALLERY -> GaleriaScreen()
+                                TabItem.GALLERY -> GaleriaScreen(
+                                    refreshTick = uiState.mediaRefreshTick
+                                )
                             }
                         }
 
@@ -516,27 +466,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIncomingShareIntent(intent)
-    }
-
-    private fun getInstalledYtDlpVersion(): String {
-        return try {
-            val req = YoutubeDLRequest("--version")
-            val resp = YoutubeDL.getInstance().execute(req)
-            resp.out.trim().ifEmpty { "2025.11.12" }
-        } catch (_: Exception) {
-            "2025.11.12"
-        }
     }
 
     private fun handleIncomingShareIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
             intent.getStringExtra(Intent.EXTRA_TEXT)?.let { rawText ->
                 val clean = cleanIncomingUrl(rawText)
-                if (clean.startsWith("http")) {
+                if (clean.startsWith("http", ignoreCase = true)) {
                     sharedUrlState.value = clean
                     selectedTab.value = TabItem.DOWNLOADS
-                    autoStartSignalState.intValue += 1
+                    DownloadController.enqueueOrStart(
+                        applicationContext,
+                        clean,
+                        selectedQualityState.value
+                    )
                 }
             }
         }
@@ -551,11 +496,23 @@ class MainActivity : ComponentActivity() {
                 perms.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
         }
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_EXTERNAL_STORAGE)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                perms.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_MEDIA_VIDEO)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
                 perms.add(android.Manifest.permission.READ_MEDIA_VIDEO)
+            }
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_MEDIA_AUDIO)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                perms.add(android.Manifest.permission.READ_MEDIA_AUDIO)
             }
             if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -721,81 +678,6 @@ fun cleanIncomingUrl(raw: String): String {
     return match.trimEnd('/', ' ', '\n', '\r')
 }
 
-/**
- * Resuelve enlaces de X/Twitter (incluyendo tweets sensibles +18 / NSFW o retweets)
- * usando las APIs públicas de FxTwitter / VxTwitter.
- */
-fun resolveTwitterDirectVideo(url: String, quality: QualityMode): Pair<String, String>? {
-    val tweetId = Regex("""(?:x\.com|twitter\.com|fxtwitter\.com|vxtwitter\.com)/(?:[^/]+/)?status/(\d+)""", RegexOption.IGNORE_CASE)
-        .find(url)?.groupValues?.getOrNull(1) ?: return null
-
-    try {
-        val conn = (java.net.URL("https://api.fxtwitter.com/Twitter/status/$tweetId").openConnection() as java.net.HttpURLConnection).apply {
-            connectTimeout = 6000
-            readTimeout = 6000
-            setRequestProperty("User-Agent", "MultiVideoDownloader/1.1")
-        }
-        if (conn.responseCode == 200) {
-            val body = conn.inputStream.bufferedReader().use { it.readText() }
-            val root = org.json.JSONObject(body)
-            val tweet = root.optJSONObject("tweet")
-            val author = tweet?.optJSONObject("author")?.optString("screen_name", "x_video") ?: "x_video"
-            val videos = tweet?.optJSONObject("media")?.optJSONArray("videos")
-            if (videos != null && videos.length() > 0) {
-                val vidObj = videos.getJSONObject(0)
-                var chosenUrl = vidObj.optString("url", "")
-                if (quality == QualityMode.HD720) {
-                    val variants = vidObj.optJSONArray("variants")
-                    if (variants != null) {
-                        var bestBitrate = -1
-                        for (i in 0 until variants.length()) {
-                            val v = variants.getJSONObject(i)
-                            val ctype = v.optString("content_type", "")
-                            val vUrl = v.optString("url", "")
-                            val br = v.optInt("bitrate", 0)
-                            if (ctype == "video/mp4" && (vUrl.contains("720") || vUrl.contains("600x") || vUrl.contains("480") || br in 1..2500000)) {
-                                if (br > bestBitrate) {
-                                    bestBitrate = br
-                                    chosenUrl = vUrl
-                                }
-                            }
-                        }
-                    }
-                }
-                if (chosenUrl.startsWith("http")) {
-                    return Pair(chosenUrl, "${author}_${tweetId}")
-                }
-            }
-        }
-    } catch (e: Exception) {
-        Log.w("MultiDownloader", "FxTwitter fallback warning: ${e.message}")
-    }
-
-    try {
-        val conn = (java.net.URL("https://api.vxtwitter.com/Twitter/status/$tweetId").openConnection() as java.net.HttpURLConnection).apply {
-            connectTimeout = 6000
-            readTimeout = 6000
-            setRequestProperty("User-Agent", "MultiVideoDownloader/1.1")
-        }
-        if (conn.responseCode == 200) {
-            val body = conn.inputStream.bufferedReader().use { it.readText() }
-            val root = org.json.JSONObject(body)
-            val author = root.optString("user_screen_name", "x_video")
-            val mediaUrls = root.optJSONArray("mediaURLs")
-            if (mediaUrls != null && mediaUrls.length() > 0) {
-                val chosenUrl = mediaUrls.optString(0, "")
-                if (chosenUrl.startsWith("http")) {
-                    return Pair(chosenUrl, "${author}_${tweetId}")
-                }
-            }
-        }
-    } catch (e: Exception) {
-        Log.w("MultiDownloader", "VxTwitter fallback warning: ${e.message}")
-    }
-
-    return null
-}
-
 enum class QualityMode(
     val shortTitle: String,
     val badge: String,
@@ -810,39 +692,60 @@ enum class QualityMode(
 @Composable
 fun DownloaderScreen(
     initialUrl: String,
-    autoStartSignal: Int,
-    engineReady: Boolean,
-    engineVersion: String,
-    initialStatus: String,
-    onVersionUpdated: (String) -> Unit,
+    selectedQuality: QualityMode,
+    onSelectQuality: (QualityMode) -> Unit,
+    uiState: DownloadUiState,
     onOpenGallery: () -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
+    val windowInfo = LocalWindowInfo.current
+
+    val engineReady = uiState.engineReady
+    val isDownloading = uiState.isDownloading
+    val activeDownloadUrl = uiState.activeDownloadUrl
+    val isUpdating = uiState.isUpdatingEngine
+    val progress = uiState.progress
+    val etaSeconds = uiState.etaSeconds
+    val statusText = uiState.statusText
+    val logOutput = uiState.logOutput
+    val completedDownload = uiState.completedDownload
+    val downloadQueue = uiState.queue
+    val activeStamp = uiState.activeStamp
 
     var urlInput by remember(initialUrl) { mutableStateOf(initialUrl) }
     var inputFocused by remember { mutableStateOf(false) }
-    var selectedQuality by remember { mutableStateOf(QualityMode.BEST) }
-    var isDownloading by remember { mutableStateOf(false) }
-    var activeDownloadUrl by remember { mutableStateOf("") }
-    var isUpdating by remember { mutableStateOf(false) }
-    var progress by remember { mutableFloatStateOf(0f) }
-    var etaSeconds by remember { mutableLongStateOf(-1L) }
-    var statusText by remember(initialStatus) { mutableStateOf(initialStatus) }
-    var logOutput by remember { mutableStateOf("") }
     var showLogs by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var completedDownload by remember { mutableStateOf<CompletedDownload?>(null) }
+    var localValidationError by remember { mutableStateOf<String?>(null) }
     var activeSubTab by remember { mutableIntStateOf(0) }
     var recentMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var downloadQueue by remember { mutableStateOf<List<QueuedItem>>(emptyList()) }
-    var lastHandledShareSignal by remember { mutableIntStateOf(0) }
+    var clipboardSuggestion by remember { mutableStateOf<String?>(null) }
+    var dismissedClipUrl by remember { mutableStateOf<String?>(null) }
 
-    val processId = remember { "MultiVideoDownload_${System.currentTimeMillis()}" }
-
+    val errorMessage = localValidationError ?: uiState.errorMessage
     val currentStamp = remember(urlInput) { detectPlatformStamp(urlInput) }
-    val activeStamp = remember(activeDownloadUrl) { detectPlatformStamp(activeDownloadUrl) }
+
+    val cookiesPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            DownloadController.importCookies(context, uri)
+                .onSuccess { count ->
+                    Toast.makeText(
+                        context,
+                        "Cookies importadas ($count entradas)",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                .onFailure { err ->
+                    Toast.makeText(
+                        context,
+                        err.message ?: "No se pudieron importar las cookies.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+        }
+    }
 
     // Vibración háptica tipo golpe de sello cuando detecta un link nuevo
     LaunchedEffect(currentStamp?.mainStamp, currentStamp?.bottomCode) {
@@ -851,171 +754,46 @@ fun DownloaderScreen(
         }
     }
 
-    LaunchedEffect(completedDownload, isDownloading) {
-        withContext(Dispatchers.IO) {
-            val items = queryDownloadedMedia(context)
-            withContext(Dispatchers.Main) {
-                recentMedia = items
-            }
+    LaunchedEffect(completedDownload) {
+        if (completedDownload != null) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         }
     }
 
-    fun executeDownloadNow(targetUrl: String, qualityToUse: QualityMode) {
-        errorMessage = null
-        completedDownload = null
-        isDownloading = true
-        activeDownloadUrl = targetUrl
-        progress = 0f
-        etaSeconds = -1L
-        statusText = "Analizando enlace y buscando streams..."
-        logOutput = ""
-
-        scope.launch(Dispatchers.IO) {
-            try {
-                val stagingDir = File(
-                    context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.cacheDir,
-                    "staging"
-                )
-                if (!stagingDir.exists()) {
-                    stagingDir.mkdirs()
-                }
-                stagingDir.listFiles()?.forEach { it.delete() }
-
-                val isAudioOnly = qualityToUse == QualityMode.AUDIO
-                val twitterResolved = resolveTwitterDirectVideo(targetUrl, qualityToUse)
-                val effectiveUrl = twitterResolved?.first ?: targetUrl
-                val outputTemplate = if (twitterResolved != null) {
-                    "${stagingDir.absolutePath}/${twitterResolved.second}.%(ext)s"
-                } else {
-                    "${stagingDir.absolutePath}/%(title).90s_%(id)s.%(ext)s"
-                }
-
-                val request = YoutubeDLRequest(effectiveUrl).apply {
-                    addOption("--no-mtime")
-                    addOption("--no-playlist")
-                    addOption("--no-check-certificates")
-                    addOption("--prefer-free-formats")
-                    addOption("--retries", "3")
-                    addOption("--fragment-retries", "5")
-                    addOption("--concurrent-fragments", "4")
-
-                    when (qualityToUse) {
-                        QualityMode.BEST -> {
-                            addOption("-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b")
-                            addOption("--merge-output-format", "mp4")
-                        }
-                        QualityMode.HD720 -> {
-                            addOption("-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4] / bv*[height<=720]+ba/b[height<=720]/b")
-                            addOption("--merge-output-format", "mp4")
-                        }
-                        QualityMode.AUDIO -> {
-                            addOption("-x")
-                            addOption("--audio-format", "mp3")
-                            addOption("--audio-quality", "0")
-                        }
-                    }
-
-                    addOption("-o", outputTemplate)
-                }
-
-                YoutubeDL.getInstance().execute(
-                    request,
-                    processId
-                ) { currentProgress, etaInSeconds, line ->
-                    scope.launch(Dispatchers.Main) {
-                        if (currentProgress >= 0f) {
-                            progress = (currentProgress / 100f).coerceIn(0f, 1f)
-                        }
-                        etaSeconds = etaInSeconds
-                        if (line.isNotBlank()) {
-                            logOutput = line
-                        }
-                    }
-                }
-
-                val downloadedFiles = stagingDir.listFiles { file ->
-                    file.isFile && file.length() > 0 && !file.name.endsWith(".part") && !file.name.endsWith(".ytdl")
-                }
-
-                if (!downloadedFiles.isNullOrEmpty()) {
-                    val savedFile = downloadedFiles.first()
-                    val cleanTitle = savedFile.nameWithoutExtension
-                    val sizeMb = String.format(Locale.US, "%.1f MB", savedFile.length() / 1e6)
-
-                    val publicUri = if (isAudioOnly) {
-                        saveAudioToMediaStore(context, savedFile, cleanTitle)
-                    } else {
-                        saveVideoToMediaStore(context, savedFile, cleanTitle)
-                    }
-
-                    withContext(Dispatchers.Main) {
-                        isDownloading = false
-                        progress = 1f
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        completedDownload = CompletedDownload(
-                            title = savedFile.name,
-                            sizeText = sizeMb,
-                            uri = publicUri,
-                            isAudio = isAudioOnly
-                        )
-                        statusText = "Guardado en Descargas / MultiVideo (${savedFile.name})"
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        isDownloading = false
-                        errorMessage = "El proceso finalizó pero no se generó el archivo."
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("MultiDownloader", "Error en descarga", e)
-                val err = e.localizedMessage ?: e.message ?: "Error desconocido"
-                withContext(Dispatchers.Main) {
-                    isDownloading = false
-                    errorMessage = "El enlace no respondió o requiere actualizar el motor. Verifica que el video sea público."
-                    logOutput = err
-                }
-            }
-        }
+    LaunchedEffect(uiState.mediaRefreshTick, isDownloading) {
+        val items = withContext(Dispatchers.IO) { queryDownloadedMedia(context) }
+        recentMedia = items
     }
 
-    // Procesar automáticamente el siguiente elemento en cola cuando termine la descarga activa
-    LaunchedEffect(isDownloading, downloadQueue.size, engineReady) {
-        if (engineReady && !isDownloading && downloadQueue.isNotEmpty()) {
-            val next = downloadQueue.first()
-            downloadQueue = downloadQueue.drop(1)
-            executeDownloadNow(next.url, next.quality)
-        }
-    }
-
-    // Auto-descarga al compartir desde X / IG / TikTok hacia MultiVideo
-    LaunchedEffect(autoStartSignal, engineReady) {
-        if (engineReady && autoStartSignal > lastHandledShareSignal) {
-            lastHandledShareSignal = autoStartSignal
-            val clean = cleanIncomingUrl(initialUrl)
-            if (clean.startsWith("http")) {
-                urlInput = clean
-                if (!isDownloading) {
-                    executeDownloadNow(clean, selectedQuality)
-                } else {
-                    val stamp = detectPlatformStamp(clean) ?: StampSpec("COLA", "★ WEB ★", "EN COLA", EditorialPalette.Ink)
-                    downloadQueue = downloadQueue + QueuedItem(System.currentTimeMillis(), clean, selectedQuality, stamp)
-                }
-            }
+    // Sugerencia automática de enlace en portapapeles al volver a enfocar la app
+    LaunchedEffect(windowInfo.isWindowFocused) {
+        if (windowInfo.isWindowFocused) {
+            val cleanClip = runCatching {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val raw = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
+                if (!raw.isNullOrBlank()) cleanIncomingUrl(raw) else ""
+            }.getOrDefault("")
+            clipboardSuggestion = if (
+                cleanClip.startsWith("http", ignoreCase = true) &&
+                cleanClip != urlInput.trim() &&
+                cleanClip != dismissedClipUrl
+            ) cleanClip else null
         }
     }
 
     fun onMainActionClick() {
         val targetUrl = cleanIncomingUrl(urlInput.trim())
-        if (targetUrl.isEmpty() || !targetUrl.startsWith("http")) {
-            errorMessage = "Pega un enlace válido que empiece con https://..."
+        if (targetUrl.isEmpty() || !targetUrl.startsWith("http", ignoreCase = true)) {
+            localValidationError = "Pega un enlace válido que empiece con https://..."
             return
         }
+        localValidationError = null
+        DownloadController.clearError()
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        if (!isDownloading) {
-            executeDownloadNow(targetUrl, selectedQuality)
-        } else {
-            val stamp = detectPlatformStamp(targetUrl) ?: StampSpec("COLA", "★ WEB ★", "EN COLA", EditorialPalette.Ink)
-            downloadQueue = downloadQueue + QueuedItem(System.currentTimeMillis(), targetUrl, selectedQuality, stamp)
+        val wasDownloading = isDownloading
+        DownloadController.enqueueOrStart(context, targetUrl, selectedQuality)
+        clipboardSuggestion = null
+        if (wasDownloading) {
             urlInput = ""
             activeSubTab = 1
         }
@@ -1066,7 +844,7 @@ fun DownloaderScreen(
 
         // Lede en Courier Prime
         Text(
-            text = "Pega un enlace de Instagram, X, TikTok o Facebook. Se guarda en Descargas, en la mejor calidad disponible.",
+            text = "Pega un enlace de Instagram, X, TikTok o Facebook. Se guarda en Galería (Movies / Music), en la mejor calidad disponible.",
             color = EditorialPalette.InkSoft,
             fontFamily = EditorialType.MonoTypewriter,
             fontSize = 12.5.sp,
@@ -1110,7 +888,73 @@ fun DownloaderScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Campo de texto estilo Máquina de escribir
+        // Campo de texto estilo Máquina de escribir (y sugerencia de portapapeles si aplica)
+        clipboardSuggestion?.let { clipUrl ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(EditorialPalette.BrickTint, RoundedCornerShape(2.dp))
+                    .border(1.dp, EditorialPalette.Brick.copy(alpha = 0.45f), RoundedCornerShape(2.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "PORTAPAPELES // LISTO",
+                        color = EditorialPalette.Brick,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.5.sp,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = clipUrl,
+                        color = EditorialPalette.InkSoft,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .background(EditorialPalette.Brick, RoundedCornerShape(2.dp))
+                        .clickable {
+                            urlInput = clipUrl
+                            localValidationError = null
+                            DownloadController.clearError()
+                            clipboardSuggestion = null
+                        }
+                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        text = "PEGAR",
+                        color = EditorialPalette.PaperInk,
+                        fontFamily = EditorialType.MonoTypewriter,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        dismissedClipUrl = clipUrl
+                        clipboardSuggestion = null
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Descartar enlace del portapapeles",
+                        tint = EditorialPalette.Muted,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+        }
+
         val fieldBorderColor = when {
             errorMessage != null -> EditorialPalette.Danger
             inputFocused -> EditorialPalette.Ink
@@ -1150,7 +994,8 @@ fun DownloaderScreen(
                     value = urlInput,
                     onValueChange = {
                         urlInput = it
-                        if (errorMessage != null) errorMessage = null
+                        localValidationError = null
+                        DownloadController.clearError()
                     },
                     singleLine = true,
                     textStyle = TextStyle(
@@ -1170,7 +1015,8 @@ fun DownloaderScreen(
                 IconButton(
                     onClick = {
                         urlInput = ""
-                        errorMessage = null
+                        localValidationError = null
+                        DownloadController.clearError()
                     },
                     modifier = Modifier.size(36.dp)
                 ) {
@@ -1198,7 +1044,9 @@ fun DownloaderScreen(
                         val pasted = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
                         if (!pasted.isNullOrBlank()) {
                             urlInput = cleanIncomingUrl(pasted)
-                            errorMessage = null
+                            localValidationError = null
+                            DownloadController.clearError()
+                            clipboardSuggestion = null
                         }
                     }
                     .padding(horizontal = 12.dp),
@@ -1271,7 +1119,7 @@ fun DownloaderScreen(
                         .border(1.dp, borderCol, RoundedCornerShape(2.dp))
                         .clickable {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            selectedQuality = mode
+                            onSelectQuality(mode)
                         },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
@@ -1325,7 +1173,7 @@ fun DownloaderScreen(
             )
             Spacer(modifier = Modifier.width(10.dp))
             Text(
-                text = if (selectedQuality == QualityMode.AUDIO) "Música / MultiDownloader" else "Descargas / MultiVideo",
+                text = if (selectedQuality == QualityMode.AUDIO) "Music / MultiDownloader" else "Movies / MultiDownloader",
                 color = EditorialPalette.Ink,
                 fontFamily = EditorialType.MonoTypewriter,
                 fontWeight = FontWeight.Bold,
@@ -1346,7 +1194,7 @@ fun DownloaderScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         // SECCIÓN 4: BOTÓN CTA PRINCIPAL (Permite encolar si ya está descargando)
-        val ctaEnabled = engineReady && !isUpdating
+        val ctaEnabled = !isUpdating
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1476,9 +1324,7 @@ fun DownloaderScreen(
                         textDecoration = TextDecoration.Underline,
                         letterSpacing = 1.sp,
                         modifier = Modifier.clickable {
-                            YoutubeDL.getInstance().destroyProcessById(processId)
-                            isDownloading = false
-                            statusText = "Descarga cancelada por el usuario."
+                            DownloadController.cancelActive(clearPendingQueue = false)
                         }
                     )
                 }
@@ -1520,7 +1366,7 @@ fun DownloaderScreen(
                                 fontSize = 10.sp
                             )
                             Text(
-                                text = selectedQuality.shortTitle,
+                                text = uiState.activeQuality.shortTitle,
                                 color = EditorialPalette.Muted,
                                 fontFamily = EditorialType.MonoTypewriter,
                                 fontSize = 9.sp
@@ -1566,13 +1412,13 @@ fun DownloaderScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Guardando en Descargas / MultiVideo",
+                        text = if (uiState.activeQuality == QualityMode.AUDIO) "Guardando en Music / MultiDownloader" else "Guardando en Movies / MultiDownloader",
                         color = EditorialPalette.Muted,
                         fontFamily = EditorialType.MonoTypewriter,
                         fontSize = 9.sp
                     )
                     Text(
-                        text = selectedQuality.badge,
+                        text = uiState.activeQuality.badge,
                         color = EditorialPalette.Muted,
                         fontFamily = EditorialType.MonoTypewriter,
                         fontSize = 9.sp,
@@ -1581,7 +1427,7 @@ fun DownloaderScreen(
                 }
             }
         } else if (completedDownload != null) {
-            val done = completedDownload!!
+            val done = completedDownload
             Spacer(modifier = Modifier.height(16.dp))
             Column(
                 modifier = Modifier
@@ -1633,7 +1479,7 @@ fun DownloaderScreen(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "${done.sizeText} // Descargas / MultiVideo",
+                    text = "${done.sizeText} // ${if (done.isAudio) "Music" else "Movies"} / MultiDownloader",
                     color = EditorialPalette.Muted,
                     fontFamily = EditorialType.MonoTypewriter,
                     fontSize = 9.5.sp
@@ -1706,9 +1552,9 @@ fun DownloaderScreen(
                             .height(44.dp)
                             .border(1.dp, EditorialPalette.Ink, RoundedCornerShape(2.dp))
                             .clickable {
-                                completedDownload = null
+                                DownloadController.clearCompleted()
                                 urlInput = ""
-                                errorMessage = null
+                                localValidationError = null
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -1753,7 +1599,7 @@ fun DownloaderScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = errorMessage ?: "",
+                    text = errorMessage,
                     color = Color(0xFF6E2A1E),
                     fontFamily = EditorialType.MonoTypewriter,
                     fontSize = 11.sp,
@@ -1924,7 +1770,7 @@ fun DownloaderScreen(
                             modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.OpenInNew,
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                                 contentDescription = "Abrir",
                                 tint = EditorialPalette.InkSoft,
                                 modifier = Modifier.size(17.dp)
@@ -2047,7 +1893,7 @@ fun DownloaderScreen(
                         }
                         IconButton(
                             onClick = {
-                                downloadQueue = downloadQueue.filterNot { it.id == qItem.id }
+                                DownloadController.removeFromQueue(qItem.id)
                             },
                             modifier = Modifier.size(36.dp)
                         ) {
@@ -2100,58 +1946,79 @@ fun DownloaderScreen(
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .height(38.dp)
-                    .border(1.dp, EditorialPalette.LineStrong, RoundedCornerShape(2.dp))
-                    .background(EditorialPalette.Raised, RoundedCornerShape(2.dp))
-                    .clickable(enabled = engineReady && !isDownloading && !isUpdating) {
-                        isUpdating = true
-                        statusText = "Actualizando yt-dlp..."
-                        scope.launch(Dispatchers.IO) {
-                            try {
-                                YoutubeDL.getInstance().updateYoutubeDL(
-                                    context,
-                                    YoutubeDL.UpdateChannel.STABLE
-                                )
-                                val verReq = YoutubeDLRequest("--version")
-                                val verResp = YoutubeDL.getInstance().execute(verReq)
-                                val newVer = verResp.out.trim()
-                                withContext(Dispatchers.Main) {
-                                    isUpdating = false
-                                    onVersionUpdated(newVer)
-                                    statusText = "Canal estable / yt-dlp $newVer"
-                                }
-                            } catch (e: Exception) {
-                                Log.e("MultiDownloader", "Error actualizando yt-dlp", e)
-                                withContext(Dispatchers.Main) {
-                                    isUpdating = false
-                                    statusText = "Ya está al día ($engineVersion)"
-                                }
-                            }
-                        }
-                    }
-                    .padding(horizontal = 12.dp),
-                contentAlignment = Alignment.Center
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
+                    modifier = Modifier
+                        .height(38.dp)
+                        .border(
+                            1.dp,
+                            if (uiState.hasCookies) EditorialPalette.Success else EditorialPalette.LineStrong,
+                            RoundedCornerShape(2.dp)
+                        )
+                        .background(
+                            if (uiState.hasCookies) EditorialPalette.SuccessTint else EditorialPalette.Raised,
+                            RoundedCornerShape(2.dp)
+                        )
+                        .clickable { cookiesPickerLauncher.launch(arrayOf("text/plain", "*/*")) }
+                        .padding(horizontal = 9.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = null,
-                        tint = EditorialPalette.InkSoft,
-                        modifier = Modifier.size(13.dp)
-                    )
                     Text(
-                        text = if (isUpdating) "ACTUALIZANDO…" else "ACTUALIZAR",
-                        color = EditorialPalette.InkSoft,
+                        text = if (uiState.hasCookies) "COOKIES ✓" else "COOKIES",
+                        color = if (uiState.hasCookies) EditorialPalette.Success else EditorialPalette.InkSoft,
                         fontFamily = EditorialType.MonoTypewriter,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 9.sp,
-                        letterSpacing = 0.8.sp
+                        fontSize = 8.5.sp,
+                        letterSpacing = 0.6.sp
                     )
+                    if (uiState.hasCookies) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Quitar cookies",
+                            tint = EditorialPalette.Danger,
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clickable {
+                                    DownloadController.clearCookies(context)
+                                    Toast.makeText(context, "Cookies eliminadas", Toast.LENGTH_SHORT).show()
+                                }
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .height(38.dp)
+                        .border(1.dp, EditorialPalette.LineStrong, RoundedCornerShape(2.dp))
+                        .background(EditorialPalette.Raised, RoundedCornerShape(2.dp))
+                        .clickable(enabled = engineReady && !isDownloading && !isUpdating) {
+                            DownloadController.updateEngineNow(context)
+                        }
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = EditorialPalette.InkSoft,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = if (isUpdating) "ACTUALIZANDO…" else "ACTUALIZAR",
+                            color = EditorialPalette.InkSoft,
+                            fontFamily = EditorialType.MonoTypewriter,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 8.5.sp,
+                            letterSpacing = 0.7.sp
+                        )
+                    }
                 }
             }
         }
@@ -2234,6 +2101,16 @@ fun openMediaUri(context: Context, uri: Uri, isAudio: Boolean) {
         }
         context.startActivity(intent)
     } catch (e: Exception) {
+        if (!isAudio) {
+            val openedInternal = runCatching {
+                val playerIntent = Intent(context, PlayerScreen::class.java).apply {
+                    data = uri
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(playerIntent)
+            }.isSuccess
+            if (openedInternal) return
+        }
         Log.e("MultiDownloader", "No se pudo abrir archivo: ${e.message}")
         Toast.makeText(
             context,
@@ -2288,7 +2165,6 @@ fun saveVideoToMediaStore(context: Context, sourceFile: File, title: String): Ur
             values.put(MediaStore.Video.Media.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
         }
-        android.media.MediaScannerConnection.scanFile(context, arrayOf(sourceFile.absolutePath), arrayOf("video/mp4"), null)
         uri
     } catch (e: Exception) {
         Log.e("MediaStore", "Error copiando a MediaStore", e)
@@ -2327,7 +2203,6 @@ fun saveAudioToMediaStore(context: Context, sourceFile: File, title: String): Ur
             values.put(MediaStore.Audio.Media.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
         }
-        android.media.MediaScannerConnection.scanFile(context, arrayOf(sourceFile.absolutePath), arrayOf("audio/mpeg"), null)
         uri
     } catch (e: Exception) {
         Log.e("MediaStore", "Error copiando audio a MediaStore", e)
